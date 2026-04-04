@@ -62,6 +62,7 @@ Python:
 
 Expected KITTI directory layout:
 
+```
 data/kitti/
 ├── poses/
 │   └── 05.txt
@@ -71,6 +72,7 @@ data/kitti/
         ├── times.txt
         ├── image_0/
         └── image_1/
+```
 
 ## Build
 
