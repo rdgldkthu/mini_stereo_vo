@@ -11,11 +11,12 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 find_package(Eigen3 REQUIRED)
-find_package(OpenCV REQUIRED COMPONENTS core imgcodecs imgproc highgui)
+find_package(OpenCV REQUIRED COMPONENTS core imgcodecs imgproc highgui features2d)
 
 add_executable(run_kitti
   app/run_kitti.cpp
   src/camera.cpp
+  src/stereo_initializer.cpp
 )
 
 target_include_directories(run_kitti

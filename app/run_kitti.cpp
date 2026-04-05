@@ -10,6 +10,8 @@
 #include <opencv2/opencv.hpp>
 
 #include "svo/camera.h"
+#include "svo/frame.h"
+#include "svo/stereo_initializer.h"
 
 namespace fs = std::filesystem;
 
@@ -119,6 +121,67 @@ int main(int argc, char **argv) {
     } else {
       std::cout << "Synthetic triangulation test failed.\n";
     }
+  }
+
+  svo::Frame frame;
+  frame.id = 0;
+  frame.left_img = first_left;
+  frame.right_img = first_right;
+
+  svo::StereoInitializer::Options init_options;
+  init_options.max_features = 1500;
+  init_options.hamming_threshold = 40;
+  init_options.row_tolerance_px = 2.0;
+  init_options.min_disparity_px = 3.0;
+  init_options.max_disparity_px = 120.0;
+  init_options.max_visualized_matches = 100;
+
+  svo::StereoInitializer initializer(init_options);
+  svo::StereoInitResult init_result = initializer.run(frame, camera);
+
+  std::cout << "Stereo initialization result:\n";
+  std::cout << "  left keypoints: " << init_result.num_left_keypoints << "\n";
+  std::cout << "  right keypoints: " << init_result.num_right_keypoints << "\n";
+  std::cout << "  raw matches: " << init_result.num_raw_matches << "\n";
+  std::cout << "  row filtered: " << init_result.num_row_filtered << "\n";
+  std::cout << "  disparity filtered: " << init_result.num_disparity_filtered
+            << "\n";
+  std::cout << "  triangulated: " << init_result.num_triangulated << "\n";
+  std::cout << "  depth min/mean/max: " << init_result.min_depth << " / "
+            << init_result.mean_depth << " / " << init_result.max_depth << "\n";
+
+  fs::create_directories("results/debug");
+
+  if (!init_result.match_vis.empty()) {
+    cv::imwrite("results/debug/05_init_matches.png", init_result.match_vis);
+  }
+
+  {
+    std::ofstream ofs("results/debug/05_init_points.txt");
+    ofs << "# id x y z\n";
+    for (const auto &mp : init_result.landmarks) {
+      ofs << mp.id << " " << mp.p_cam.x() << " " << mp.p_cam.y() << " "
+          << mp.p_cam.z() << "\n";
+    }
+  }
+
+  {
+    std::ofstream ofs("results/debug/05_init_stats.txt");
+    ofs << "num_left_keypoints " << init_result.num_left_keypoints << "\n";
+    ofs << "num_right_keypoints " << init_result.num_right_keypoints << "\n";
+    ofs << "num_raw_matches " << init_result.num_raw_matches << "\n";
+    ofs << "num_row_filtered " << init_result.num_row_filtered << "\n";
+    ofs << "num_disparity_filtered " << init_result.num_disparity_filtered
+        << "\n";
+    ofs << "num_triangulated " << init_result.num_triangulated << "\n";
+    ofs << "min_depth " << init_result.min_depth << "\n";
+    ofs << "mean_depth " << init_result.mean_depth << "\n";
+    ofs << "max_depth " << init_result.max_depth << "\n";
+  }
+
+  if (!init_result.match_vis.empty()) {
+    cv::imshow("stereo initializer", init_result.match_vis);
+    cv::waitKey(0);
   }
 
   write_identity_kitti(output_pose, left_files.size());
