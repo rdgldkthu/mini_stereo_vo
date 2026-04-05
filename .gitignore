@@ -16,3 +16,4 @@ CMakeUserPresets.json
 /data/
 /results/
 /.vscode/
+/.cache/
