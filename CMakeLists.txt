@@ -15,6 +15,7 @@ find_package(OpenCV REQUIRED COMPONENTS core imgcodecs imgproc highgui)
 
 add_executable(run_kitti
   app/run_kitti.cpp
+  src/camera.cpp
 )
 
 target_include_directories(run_kitti

@@ -9,6 +9,8 @@
 
 #include <opencv2/opencv.hpp>
 
+#include "svo/camera.h"
+
 namespace fs = std::filesystem;
 
 std::vector<fs::path> sorted_pngs(const fs::path &dir) {
@@ -57,8 +59,10 @@ int main(int argc, char **argv) {
       (argc == 4) ? fs::path(argv[3])
                   : fs::path("results/traj") / (sequence + ".txt");
 
-  const fs::path left_dir = kitti_root / "sequences" / sequence / "image_0";
-  const fs::path right_dir = kitti_root / "sequences" / sequence / "image_1";
+  const fs::path seq_dir = kitti_root / "sequences" / sequence;
+  const fs::path calib_path = seq_dir / "calib.txt";
+  const fs::path left_dir = seq_dir / "image_0";
+  const fs::path right_dir = seq_dir / "image_1";
 
   const auto left_files = sorted_pngs(left_dir);
   const auto right_files = sorted_pngs(right_dir);
@@ -75,6 +79,46 @@ int main(int argc, char **argv) {
     std::cerr << "Left/right image count mismatch: " << left_files.size()
               << " vs " << right_files.size() << "\n";
     return 1;
+  }
+
+  // Load calibration
+  svo::Camera camera;
+  if (!camera.loadFromKittiCalib(calib_path.string())) {
+    std::cerr << "Failed to load KITTI calibration from: " << calib_path
+              << "\n";
+    return 1;
+  }
+
+  std::cout << "Loaded calibration from: " << calib_path << "\n";
+  camera.print();
+
+  // Read first stereo pair for sanity checks
+  cv::Mat first_left = cv::imread(left_files[0].string(), cv::IMREAD_GRAYSCALE);
+  cv::Mat first_right =
+      cv::imread(right_files[0].string(), cv::IMREAD_GRAYSCALE);
+
+  if (first_left.empty() || first_right.empty()) {
+    std::cerr << "Failed to read first stereo frame.\n";
+    return 1;
+  }
+
+  std::cout << "First frame size: " << first_left.cols << " x "
+            << first_left.rows << "\n";
+
+  // Simple triangulation sanity test with a fake disparity
+  {
+    const double ul = 200.0;
+    const double vl = 150.0;
+    const double ur = 190.0; // disparity = 10 px
+
+    Eigen::Vector3d p_c;
+    if (camera.triangulateRectified(ul, vl, ur, p_c)) {
+      std::cout << "Sample triangulated point from synthetic disparity:\n";
+      std::cout << "  ul=" << ul << ", vl=" << vl << ", ur=" << ur << "\n";
+      std::cout << "  p_c = [" << p_c.transpose() << "]\n";
+    } else {
+      std::cout << "Synthetic triangulation test failed.\n";
+    }
   }
 
   write_identity_kitti(output_pose, left_files.size());
