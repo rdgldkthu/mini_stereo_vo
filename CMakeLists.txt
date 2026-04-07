@@ -13,24 +13,32 @@ endif()
 find_package(Eigen3 REQUIRED)
 find_package(OpenCV REQUIRED COMPONENTS core imgcodecs imgproc highgui features2d)
 
-add_executable(run_kitti
-  app/run_kitti.cpp
+add_library(svo_core
   src/camera.cpp
+  src/dataset_kitti.cpp
   src/stereo_initializer.cpp
 )
 
-target_include_directories(run_kitti
-  PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
+target_include_directories(svo_core
+  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_link_libraries(svo_core
+  PUBLIC Eigen3::Eigen ${OpenCV_LIBS}
+)
+
+target_compile_options(svo_core
+  PRIVATE -Wall -Wextra -Wpedantic
+)
+
+add_executable(run_kitti
+  app/run_kitti.cpp
 )
 
 target_link_libraries(run_kitti
-  PRIVATE
-    Eigen3::Eigen
-    ${OpenCV_LIBS}
+  PRIVATE svo_core
 )
 
 target_compile_options(run_kitti
-  PRIVATE
-    -Wall -Wextra -Wpedantic
+  PRIVATE -Wall -Wextra -Wpedantic
 )

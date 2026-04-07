@@ -1,35 +1,18 @@
-#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <stdexcept>
 #include <string>
-#include <vector>
 
 #include <opencv2/opencv.hpp>
 
 #include "svo/camera.h"
+#include "svo/dataset_kitti.h"
 #include "svo/frame.h"
 #include "svo/stereo_initializer.h"
 
 namespace fs = std::filesystem;
-
-std::vector<fs::path> sorted_pngs(const fs::path &dir) {
-  std::vector<fs::path> files;
-  if (!fs::exists(dir) || !fs::is_directory(dir)) {
-    return files;
-  }
-
-  for (const auto &entry : fs::directory_iterator(dir)) {
-    if (entry.is_regular_file() && entry.path().extension() == ".png") {
-      files.push_back(entry.path());
-    }
-  }
-
-  std::sort(files.begin(), files.end());
-  return files;
-}
 
 void write_identity_kitti(const fs::path &out_path, std::size_t num_frames) {
   fs::create_directories(out_path.parent_path());
@@ -61,72 +44,30 @@ int main(int argc, char **argv) {
       (argc == 4) ? fs::path(argv[3])
                   : fs::path("results/traj") / (sequence + ".txt");
 
-  const fs::path seq_dir = kitti_root / "sequences" / sequence;
-  const fs::path calib_path = seq_dir / "calib.txt";
-  const fs::path left_dir = seq_dir / "image_0";
-  const fs::path right_dir = seq_dir / "image_1";
-
-  const auto left_files = sorted_pngs(left_dir);
-  const auto right_files = sorted_pngs(right_dir);
-
-  if (left_files.empty()) {
-    std::cerr << "No left images found in: " << left_dir << "\n";
-    return 1;
-  }
-  if (right_files.empty()) {
-    std::cerr << "No right images found in: " << right_dir << "\n";
-    return 1;
-  }
-  if (left_files.size() != right_files.size()) {
-    std::cerr << "Left/right image count mismatch: " << left_files.size()
-              << " vs " << right_files.size() << "\n";
+  svo::DatasetKitti dataset;
+  if (!dataset.open(kitti_root.string(), sequence)) {
+    std::cerr << "Failed to open KITTI dataset.\n";
     return 1;
   }
 
-  // Load calibration
   svo::Camera camera;
-  if (!camera.loadFromKittiCalib(calib_path.string())) {
-    std::cerr << "Failed to load KITTI calibration from: " << calib_path
-              << "\n";
+  if (!camera.loadFromKittiCalib(dataset.calibPath().string())) {
+    std::cerr << "Failed to load KITTI calibration from: "
+              << dataset.calibPath() << "\n";
     return 1;
   }
 
-  std::cout << "Loaded calibration from: " << calib_path << "\n";
+  std::cout << "Loaded calibration from: " << dataset.calibPath() << "\n";
   camera.print();
 
-  // Read first stereo pair for sanity checks
-  cv::Mat first_left = cv::imread(left_files[0].string(), cv::IMREAD_GRAYSCALE);
-  cv::Mat first_right =
-      cv::imread(right_files[0].string(), cv::IMREAD_GRAYSCALE);
-
-  if (first_left.empty() || first_right.empty()) {
-    std::cerr << "Failed to read first stereo frame.\n";
+  svo::Frame frame0;
+  if (!dataset.loadFrame(0, frame0)) {
+    std::cerr << "Failed to load frame 0.\n";
     return 1;
   }
 
-  std::cout << "First frame size: " << first_left.cols << " x "
-            << first_left.rows << "\n";
-
-  // Simple triangulation sanity test with a fake disparity
-  {
-    const double ul = 200.0;
-    const double vl = 150.0;
-    const double ur = 190.0; // disparity = 10 px
-
-    Eigen::Vector3d p_c;
-    if (camera.triangulateRectified(ul, vl, ur, p_c)) {
-      std::cout << "Sample triangulated point from synthetic disparity:\n";
-      std::cout << "  ul=" << ul << ", vl=" << vl << ", ur=" << ur << "\n";
-      std::cout << "  p_c = [" << p_c.transpose() << "]\n";
-    } else {
-      std::cout << "Synthetic triangulation test failed.\n";
-    }
-  }
-
-  svo::Frame frame;
-  frame.id = 0;
-  frame.left_img = first_left;
-  frame.right_img = first_right;
+  std::cout << "Frame 0 size: " << frame0.left_img.cols << " x "
+            << frame0.left_img.rows << "\n";
 
   svo::StereoInitializer::Options init_options;
   init_options.max_features = 1500;
@@ -134,87 +75,84 @@ int main(int argc, char **argv) {
   init_options.row_tolerance_px = 2.0;
   init_options.min_disparity_px = 3.0;
   init_options.max_disparity_px = 120.0;
+  init_options.max_depth_m = 80.0;
+  init_options.image_border_px = 10;
   init_options.max_visualized_matches = 100;
 
   svo::StereoInitializer initializer(init_options);
-  svo::StereoInitResult init_result = initializer.run(frame, camera);
+  svo::StereoInitResult result = initializer.run(frame0, camera);
 
   std::cout << "Stereo initialization result:\n";
-  std::cout << "  left keypoints: " << init_result.num_left_keypoints << "\n";
-  std::cout << "  right keypoints: " << init_result.num_right_keypoints << "\n";
-  std::cout << "  raw matches: " << init_result.num_raw_matches << "\n";
-  std::cout << "  row filtered: " << init_result.num_row_filtered << "\n";
-  std::cout << "  disparity filtered: " << init_result.num_disparity_filtered
+  std::cout << "  left keypoints: " << result.num_left_keypoints << "\n";
+  std::cout << "  right keypoints: " << result.num_right_keypoints << "\n";
+  std::cout << "  raw matches: " << result.num_raw_matches << "\n";
+  std::cout << "  distance filtered: " << result.num_distance_filtered << "\n";
+  std::cout << "  row filtered: " << result.num_row_filtered << "\n";
+  std::cout << "  disparity filtered: " << result.num_disparity_filtered
             << "\n";
-  std::cout << "  triangulated: " << init_result.num_triangulated << "\n";
-  std::cout << "  depth min/mean/max: " << init_result.min_depth << " / "
-            << init_result.mean_depth << " / " << init_result.max_depth << "\n";
+  std::cout << "  triangulated: " << result.num_triangulated << "\n";
+  std::cout << "  disparity min/mean/max: " << result.min_disparity << " / "
+            << result.mean_disparity << " / " << result.max_disparity << "\n";
+  std::cout << "  row error mean/max: " << result.mean_row_error << " / "
+            << result.max_row_error << "\n";
+  std::cout << "  depth min/mean/max: " << result.min_depth << " / "
+            << result.mean_depth << " / " << result.max_depth << "\n";
+  std::cout << "  depth > 50m: " << result.num_depth_gt_50 << "\n";
+  std::cout << "  depth > 80m: " << result.num_depth_gt_80 << "\n";
 
   fs::create_directories("results/debug");
+  const std::string prefix = "results/debug/" + sequence + "_init";
 
-  if (!init_result.match_vis.empty()) {
-    cv::imwrite("results/debug/05_init_matches.png", init_result.match_vis);
+  if (!result.match_vis.empty()) {
+    cv::imwrite(prefix + "_matches.png", result.match_vis);
+    std::cout << "Saved match visualization to " << prefix << "_matches.png\n";
   }
 
   {
-    std::ofstream ofs("results/debug/05_init_points.txt");
-    ofs << "# id x y z\n";
-    for (const auto &mp : init_result.landmarks) {
-      ofs << mp.id << " " << mp.p_cam.x() << " " << mp.p_cam.y() << " "
-          << mp.p_cam.z() << "\n";
+    std::ofstream ofs(prefix + "_stats.txt");
+    ofs << "num_left_keypoints " << result.num_left_keypoints << "\n";
+    ofs << "num_right_keypoints " << result.num_right_keypoints << "\n";
+    ofs << "num_raw_matches " << result.num_raw_matches << "\n";
+    ofs << "num_distance_filtered " << result.num_distance_filtered << "\n";
+    ofs << "num_row_filtered " << result.num_row_filtered << "\n";
+    ofs << "num_disparity_filtered " << result.num_disparity_filtered << "\n";
+    ofs << "num_triangulated " << result.num_triangulated << "\n";
+    ofs << "num_depth_gt_50 " << result.num_depth_gt_50 << "\n";
+    ofs << "num_depth_gt_80 " << result.num_depth_gt_80 << "\n";
+    ofs << "min_disparity " << result.min_disparity << "\n";
+    ofs << "mean_disparity " << result.mean_disparity << "\n";
+    ofs << "max_disparity " << result.max_disparity << "\n";
+    ofs << "mean_row_error " << result.mean_row_error << "\n";
+    ofs << "max_row_error " << result.max_row_error << "\n";
+    ofs << "min_depth " << result.min_depth << "\n";
+    ofs << "mean_depth " << result.mean_depth << "\n";
+    ofs << "max_depth " << result.max_depth << "\n";
+  }
+  std::cout << "Saved stats to " << prefix << "_stats.txt\n";
+
+  {
+    std::ofstream ofs(prefix + "_points.txt");
+    ofs << "# id x y z ul vl ur vr disparity\n";
+
+    const size_t n = std::min(result.features.size(), result.landmarks.size());
+    for (size_t i = 0; i < n; ++i) {
+      const auto &f = result.features[i];
+      const auto &p = result.landmarks[i];
+
+      ofs << p.id << " " << p.p_cam.x() << " " << p.p_cam.y() << " "
+          << p.p_cam.z() << " " << f.kp_left.pt.x << " " << f.kp_left.pt.y
+          << " " << f.kp_right.pt.x << " " << f.kp_right.pt.y << " "
+          << f.disparity << "\n";
     }
   }
+  std::cout << "Saved points to " << prefix << "_points.txt\n";
 
-  {
-    std::ofstream ofs("results/debug/05_init_stats.txt");
-    ofs << "num_left_keypoints " << init_result.num_left_keypoints << "\n";
-    ofs << "num_right_keypoints " << init_result.num_right_keypoints << "\n";
-    ofs << "num_raw_matches " << init_result.num_raw_matches << "\n";
-    ofs << "num_row_filtered " << init_result.num_row_filtered << "\n";
-    ofs << "num_disparity_filtered " << init_result.num_disparity_filtered
-        << "\n";
-    ofs << "num_triangulated " << init_result.num_triangulated << "\n";
-    ofs << "min_depth " << init_result.min_depth << "\n";
-    ofs << "mean_depth " << init_result.mean_depth << "\n";
-    ofs << "max_depth " << init_result.max_depth << "\n";
-  }
-
-  if (!init_result.match_vis.empty()) {
-    cv::imshow("stereo initializer", init_result.match_vis);
-    cv::waitKey(0);
-  }
-
-  write_identity_kitti(output_pose, left_files.size());
-
-  std::cout << "Loaded " << left_files.size() << " stereo pairs.\n";
+  write_identity_kitti(output_pose, dataset.numFrames());
   std::cout << "Wrote dummy KITTI trajectory to: " << output_pose << "\n";
-  std::cout << "Press q or ESC to quit.\n";
 
-  for (std::size_t i = 0; i < left_files.size(); ++i) {
-    cv::Mat left = cv::imread(left_files[i].string(), cv::IMREAD_GRAYSCALE);
-    cv::Mat right = cv::imread(right_files[i].string(), cv::IMREAD_GRAYSCALE);
-
-    if (left.empty() || right.empty()) {
-      std::cerr << "Failed to read frame " << i << "\n";
-      return 1;
-    }
-
-    const int canvas_h = std::max(left.rows, right.rows);
-    const int canvas_w = left.cols + right.cols;
-    cv::Mat canvas(canvas_h, canvas_w, CV_8UC1, cv::Scalar(0));
-
-    left.copyTo(canvas(cv::Rect(0, 0, left.cols, left.rows)));
-    right.copyTo(canvas(cv::Rect(left.cols, 0, right.cols, right.rows)));
-
-    cv::putText(canvas, "KITTI seq " + sequence + " frame " + std::to_string(i),
-                cv::Point(20, 30), cv::FONT_HERSHEY_SIMPLEX, 0.8,
-                cv::Scalar(255), 2);
-
-    cv::imshow("stereo_vo day1 check", canvas);
-    const int key = cv::waitKey(10);
-    if (key == 'q' || key == 27) {
-      break;
-    }
+  if (!result.match_vis.empty()) {
+    cv::imshow("stereo initializer", result.match_vis);
+    cv::waitKey(0);
   }
 
   return 0;
