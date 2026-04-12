@@ -4,6 +4,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
@@ -13,28 +14,59 @@
 #include "svo/dataset_kitti.h"
 #include "svo/estimator.h"
 #include "svo/frame.h"
+#include "svo/map_point.h"
 #include "svo/stereo_initializer.h"
 #include "svo/tracker.h"
 
 namespace fs = std::filesystem;
 
-void writeIdentityKitti(const fs::path &out_path, std::size_t num_frames) {
-  fs::create_directories(out_path.parent_path());
+std::vector<cv::Point2f>
+makeInitialActivePoints(const svo::StereoInitResult &init_result) {
+  std::vector<cv::Point2f> points;
 
-  std::ofstream ofs(out_path);
-  if (!ofs) {
-    throw std::runtime_error("Failed to open output file: " +
-                             out_path.string());
+  const size_t n =
+      std::min(init_result.features.size(), init_result.landmarks.size());
+  points.reserve(n);
+
+  for (size_t i = 0; i < n; ++i) {
+    points.push_back(init_result.features[i].kp_left.pt);
   }
 
-  ofs << std::fixed << std::setprecision(9);
-  for (std::size_t i = 0; i < num_frames; ++i) {
-    ofs << "1 0 0 0 0 1 0 0 0 0 1 0\n";
-  }
+  return points;
 }
 
-void writeTwoFrameKitti(const fs::path &out_path, const Eigen::Matrix3d &R1,
-                        const Eigen::Vector3d &t1) {
+std::vector<svo::MapPoint>
+makeInitalActiveLandmarks(const svo::StereoInitResult &init_result) {
+  std::vector<svo::MapPoint> landmarks;
+
+  const size_t n =
+      std::min(init_result.features.size(), init_result.landmarks.size());
+  landmarks.reserve(n);
+
+  for (size_t i = 0; i < n; ++i) {
+    landmarks.push_back(init_result.landmarks[i]);
+  }
+
+  return landmarks;
+}
+
+Eigen::Matrix4d makePoseWcFromPnP(const Eigen::Matrix3d &R_cw,
+                                  const Eigen::Vector3d &t_cw) {
+  Eigen::Matrix4d T_wc = Eigen::Matrix4d::Identity();
+
+  const Eigen::Matrix3d R_wc = R_cw.transpose();
+  const Eigen::Vector3d t_wc = -R_cw * t_cw;
+
+  T_wc.block<3, 3>(0, 0) = R_wc;
+  T_wc.block<3, 1>(0, 3) = t_wc;
+
+  return T_wc;
+}
+
+void writeKittiTrajectory(const std::filesystem::path &out_path,
+                          const std::vector<Eigen::Matrix4d> &poses) {
+  namespace fs = std::filesystem;
+
   fs::create_directories(out_path.parent_path());
 
   std::ofstream ofs(out_path);
@@ -45,13 +77,17 @@ void writeTwoFrameKitti(const fs::path &out_path, const Eigen::Matrix3d &R1,
 
   ofs << std::fixed << std::setprecision(9);
 
-  // frame 0: identity
-  ofs << "1 0 0 0 0 1 0 0 0 0 1 0\n";
-
-  // frame 1
-  ofs << R1(0, 0) << " " << R1(0, 1) << " " << R1(0, 2) << " " << t1(0) << " "
-      << R1(1, 0) << " " << R1(1, 1) << " " << R1(1, 2) << " " << t1(1) << " "
-      << R1(2, 0) << " " << R1(2, 1) << " " << R1(2, 2) << " " << t1(2) << "\n";
+  for (const auto &T : poses) {
+    for (int r = 0; r < 3; ++r) {
+      for (int c = 0; c < 4; ++c) {
+        ofs << T(r, c);
+        if (!(r == 2 && c == 3)) {
+          ofs << " ";
+        }
+      }
+    }
+    ofs << "\n";
+  }
 }
 
 int main(int argc, char **argv) {
@@ -59,7 +95,7 @@ int main(int argc, char **argv) {
     std::cerr << "Usage: " << argv[0]
               << " <kitti_root> <sequence> [output_pose_file]\n";
     std::cerr << "Example: " << argv[0]
-              << " data/kitti 05 results/traj/05.txt\n";
+              << " data/kitti 05 results/traj/05_vo.txt\n";
     return 1;
   }
 
@@ -67,7 +103,10 @@ int main(int argc, char **argv) {
   const std::string sequence = argv[2];
   const fs::path output_pose =
       (argc == 4) ? fs::path(argv[3])
-                  : fs::path("results/traj") / (sequence + ".txt");
+                  : fs::path("results/traj") / (sequence + "_vo.txt");
+
+  fs::create_directories("results/debug");
+  fs::create_directories("results/traj");
 
   svo::DatasetKitti dataset;
   if (!dataset.open(kitti_root.string(), sequence)) {
@@ -86,19 +125,10 @@ int main(int argc, char **argv) {
   camera.print();
 
   svo::Frame frame0;
-  svo::Frame frame1;
-
   if (!dataset.loadFrame(0, frame0)) {
     std::cerr << "Failed to load frame 0.\n";
     return 1;
   }
-  if (!dataset.loadFrame(1, frame1)) {
-    std::cerr << "Failed to load frame 1.\n";
-    return 1;
-  }
-
-  std::cout << "Frame 0 size: " << frame0.left_img.cols << " x "
-            << frame0.left_img.rows << "\n";
 
   svo::StereoInitializer::Options init_options;
   init_options.max_features = 1500;
@@ -114,62 +144,22 @@ int main(int argc, char **argv) {
   svo::StereoInitResult init_result = initializer.run(frame0, camera);
 
   std::cout << "Stereo initialization result:\n";
-  std::cout << "  left keypoints: " << init_result.num_left_keypoints << "\n";
-  std::cout << "  right keypoints: " << init_result.num_right_keypoints << "\n";
-  std::cout << "  raw matches: " << init_result.num_raw_matches << "\n";
-  std::cout << "  distance filtered: " << init_result.num_distance_filtered
-            << "\n";
-  std::cout << "  row filtered: " << init_result.num_row_filtered << "\n";
-  std::cout << "  disparity filtered: " << init_result.num_disparity_filtered
-            << "\n";
   std::cout << "  triangulated: " << init_result.num_triangulated << "\n";
 
-  fs::create_directories("results/debug");
-  const std::string prefix = "results/debug/" + sequence + "_init";
+  if (init_result.num_triangulated < 20) {
+    std::cerr << "Too few initial landmarks.\n";
+    return 1;
+  }
 
   if (!init_result.match_vis.empty()) {
-    cv::imwrite(prefix + "_matches.png", init_result.match_vis);
+    cv::imwrite("result/debug/" + sequence + "_init_matches.png",
+                init_result.match_vis);
   }
 
-  {
-    std::ofstream ofs(prefix + "_stats.txt");
-    ofs << "num_left_keypoints " << init_result.num_left_keypoints << "\n";
-    ofs << "num_right_keypoints " << init_result.num_right_keypoints << "\n";
-    ofs << "num_raw_matches " << init_result.num_raw_matches << "\n";
-    ofs << "num_distance_filtered " << init_result.num_distance_filtered
-        << "\n";
-    ofs << "num_row_filtered " << init_result.num_row_filtered << "\n";
-    ofs << "num_disparity_filtered " << init_result.num_disparity_filtered
-        << "\n";
-    ofs << "num_triangulated " << init_result.num_triangulated << "\n";
-    ofs << "num_depth_gt_50 " << init_result.num_depth_gt_50 << "\n";
-    ofs << "num_depth_gt_80 " << init_result.num_depth_gt_80 << "\n";
-    ofs << "min_disparity " << init_result.min_disparity << "\n";
-    ofs << "mean_disparity " << init_result.mean_disparity << "\n";
-    ofs << "max_disparity " << init_result.max_disparity << "\n";
-    ofs << "mean_row_error " << init_result.mean_row_error << "\n";
-    ofs << "max_row_error " << init_result.max_row_error << "\n";
-    ofs << "min_depth " << init_result.min_depth << "\n";
-    ofs << "mean_depth " << init_result.mean_depth << "\n";
-    ofs << "max_depth " << init_result.max_depth << "\n";
-  }
-
-  {
-    std::ofstream ofs(prefix + "_points.txt");
-    ofs << "# id x y z ul vl ur vr disparity\n";
-
-    const size_t n =
-        std::min(init_result.features.size(), init_result.landmarks.size());
-    for (size_t i = 0; i < n; ++i) {
-      const auto &f = init_result.features[i];
-      const auto &p = init_result.landmarks[i];
-
-      ofs << p.id << " " << p.p_cam.x() << " " << p.p_cam.y() << " "
-          << p.p_cam.z() << " " << f.kp_left.pt.x << " " << f.kp_left.pt.y
-          << " " << f.kp_right.pt.x << " " << f.kp_right.pt.y << " "
-          << f.disparity << "\n";
-    }
-  }
+  std::vector<cv::Point2f> active_points_2d =
+      makeInitialActivePoints(init_result);
+  std::vector<svo::MapPoint> active_landmarks =
+      makeInitalActiveLandmarks(init_result);
 
   svo::Tracker::Options tracker_options;
   tracker_options.win_size = cv::Size(21, 21);
@@ -177,33 +167,7 @@ int main(int argc, char **argv) {
   tracker_options.max_bidirectional_error_px = 1.5;
   tracker_options.image_border_px = 10;
   tracker_options.max_visualized_tracks = 150;
-
   svo::Tracker tracker(tracker_options);
-  const svo::TrackResult track_result = tracker.trackFrameToFrame(
-      frame0, frame1, init_result.features, init_result.landmarks);
-
-  std::cout << "Tracking result:\n";
-  std::cout << "  input tracks: " << track_result.num_input_tracks << "\n";
-  std::cout << "  flow success: " << track_result.num_flow_success << "\n";
-  std::cout << "  inside image: " << track_result.num_inside_image << "\n";
-  std::cout << "  valid correspondences: "
-            << track_result.num_valid_correspondences << "\n";
-
-  const std::string track_prefix =
-      "results/debug/" + sequence + "_track_000001";
-
-  if (!track_result.track_vis.empty()) {
-    cv::imwrite(track_prefix + ".png", track_result.track_vis);
-  }
-
-  {
-    std::ofstream ofs("results/debug/" + sequence + "_track_stats.txt");
-    ofs << "num_input_tracks " << track_result.num_input_tracks << "\n";
-    ofs << "num_flow_success " << track_result.num_flow_success << "\n";
-    ofs << "num_inside_image " << track_result.num_inside_image << "\n";
-    ofs << "num_valid_correspondences "
-        << track_result.num_valid_correspondences << "\n";
-  }
 
   svo::Estimator::Options estimator_options;
   estimator_options.use_extrinsic_guess = false;
@@ -211,52 +175,82 @@ int main(int argc, char **argv) {
   estimator_options.reprojection_error_px = 4.0f;
   estimator_options.confidence = 0.99;
   estimator_options.min_pnp_points = 6;
-
   svo::Estimator estimator(estimator_options);
-  const svo::PoseEstimateResult pose_result = estimator.estimatePosePnPRansac(
-      track_result.object_points, track_result.image_points, camera);
 
-  std::cout << "PnP result:\n";
-  std::cout << "  success: " << pose_result.success << "\n";
-  std::cout << "  object points: " << pose_result.num_object_points << "\n";
-  std::cout << "  image points: " << pose_result.num_image_points << "\n";
-  std::cout << "  inliers: " << pose_result.num_inliers << "\n";
+  std::vector<Eigen::Matrix4d> poses;
+  poses.reserve(dataset.numFrames());
+  poses.push_back(Eigen::Matrix4d::Identity());
 
-  {
-    std::ofstream ofs("results/debug/" + sequence + "_pnp_stats.txt");
-    ofs << "success " << pose_result.success << "\n";
-    ofs << "num_object_points " << pose_result.num_object_points << "\n";
-    ofs << "num_image_points " << pose_result.num_image_points << "\n";
-    ofs << "num_inliers " << pose_result.num_inliers << "\n";
+  std::ofstream stats("results/debug/" + sequence + "_vo_stats.csv");
+  stats << "frame_id,num_active_points,num_correspondences,num_inliers,pose_"
+           "success\n";
+  stats << "0," << active_points_2d.size() << ",0,0,1\n";
 
-    if (pose_result.success) {
-      ofs << "rotation\n" << pose_result.rotation << "\n";
-      ofs << "translation\n" << pose_result.translation.transpose() << "\n";
+  svo::Frame prev_frame = frame0;
+
+  for (int frame_id = 1; frame_id < dataset.numFrames(); ++frame_id) {
+    svo::Frame curr_frame;
+    if (!dataset.loadFrame(frame_id, curr_frame)) {
+      std::cerr << "Failed to load frame " << frame_id << "\n";
+      poses.push_back(poses.back());
+      stats << frame_id << ",0,0,0,0\n";
+      continue;
     }
+
+    const svo::TrackResult track_result = tracker.trackFrameToFrame(
+        prev_frame, curr_frame, active_points_2d, active_landmarks);
+
+    bool pose_success = false;
+    int num_inliers = 0;
+
+    if (track_result.num_valid_correspondences >=
+        estimator_options.min_pnp_points) {
+      const svo::PoseEstimateResult pose_result =
+          estimator.estimatePosePnPRansac(track_result.object_points,
+                                          track_result.image_points, camera);
+
+      if (pose_result.success && pose_result.num_inliers >= 10) {
+        poses.push_back(
+            makePoseWcFromPnP(pose_result.rotation, pose_result.translation));
+        pose_success = true;
+        num_inliers = pose_result.num_inliers;
+      } else {
+        poses.push_back(poses.back());
+      }
+    } else {
+      poses.push_back(poses.back());
+    }
+
+    active_points_2d = track_result.curr_points;
+    active_landmarks = track_result.tracked_landmarks;
+
+    stats << frame_id << "," << active_points_2d.size() << ","
+          << track_result.num_valid_correspondences << "," << num_inliers << ","
+          << (pose_success ? 1 : 0) << "\n";
+
+    if (!track_result.track_vis.empty() && (frame_id % 10 == 0)) {
+      const std::string image_path = "results/debug/" + sequence + "_track_" +
+                                     cv::format("%06d", frame_id) + ".png";
+      cv::imwrite(image_path, track_result.track_vis);
+    }
+
+    std::cout << "frame " << frame_id
+              << " | active: " << active_points_2d.size()
+              << " | corr: " << track_result.num_valid_correspondences
+              << " | inliers: " << num_inliers
+              << " | pose_success: " << pose_success << "\n";
+
+    if (active_points_2d.size() < 20) {
+      std::cout << "Tracking dropped below threshold at frame " << frame_id
+                << ". Stopping early.\n";
+      break;
+    }
+
+    prev_frame = curr_frame;
   }
 
-  // keep full-length dummy export for format compatibility
-  writeIdentityKitti(output_pose, dataset.numFrames());
-
-  // write separate 2-frame pose estimate
-  if (pose_result.success) {
-    writeTwoFrameKitti("results/traj/" + sequence + "_two_frame.txt",
-                       pose_result.rotation, pose_result.translation);
-  }
-
-  std::cout << "Wrote dummy KITTI trajectory to: " << output_pose << "\n";
-  if (pose_result.success) {
-    std::cout << "Wrote two-frame trajectory to: results/traj/" << sequence
-              << "_two_frame.txt\n";
-    std::cout << "Estimated rotation:\n" << pose_result.rotation << "\n";
-    std::cout << "Estimated translation:\n"
-              << pose_result.translation.transpose() << "\n";
-  }
-
-  if (!track_result.track_vis.empty()) {
-    cv::imshow("tracking", track_result.track_vis);
-    cv::waitKey(0);
-  }
+  writeKittiTrajectory(output_pose, poses);
+  std::cout << "Wrote VO trajectory to: " << output_pose << "\n";
 
   return 0;
 }
