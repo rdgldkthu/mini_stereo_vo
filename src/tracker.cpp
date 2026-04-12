@@ -1,5 +1,8 @@
 #include "svo/tracker.h"
 
+#include <algorithm>
+#include <vector>
+
 namespace svo {
 
 Tracker::Tracker(const Options &options) : options_(options) {}
@@ -13,25 +16,18 @@ bool Tracker::isInsideImage(const cv::Point2f &pt,
 
 TrackResult
 Tracker::trackFrameToFrame(const Frame &prev_frame, const Frame &curr_frame,
-                           const std::vector<Feature> &prev_features,
+                           const std::vector<cv::Point2f> &prev_points,
                            const std::vector<MapPoint> &prev_landmarks) const {
   TrackResult result;
 
   if (prev_frame.left_img.empty() || curr_frame.left_img.empty()) {
     return result;
   }
-  if (prev_features.empty() || prev_landmarks.empty()) {
+  if (prev_points.empty() || prev_landmarks.empty()) {
     return result;
   }
-  if (prev_features.size() != prev_landmarks.size()) {
+  if (prev_points.size() != prev_landmarks.size()) {
     return result;
-  }
-
-  std::vector<cv::Point2f> prev_points;
-  prev_points.reserve(prev_features.size());
-
-  for (const auto &feature : prev_features) {
-    prev_points.push_back(feature.kp_left.pt);
   }
 
   result.num_input_tracks = static_cast<int>(prev_points.size());
@@ -68,10 +64,7 @@ Tracker::trackFrameToFrame(const Frame &prev_frame, const Frame &curr_frame,
   int num_visualized = 0;
 
   for (size_t i = 0; i < prev_points.size(); ++i) {
-    if (!status_forward[i]) {
-      continue;
-    }
-    if (!status_backward[i]) {
+    if (!status_forward[i] || !status_backward[i]) {
       continue;
     }
 
@@ -90,6 +83,7 @@ Tracker::trackFrameToFrame(const Frame &prev_frame, const Frame &curr_frame,
 
     result.prev_points.push_back(prev_points[i]);
     result.curr_points.push_back(curr_points[i]);
+    result.tracked_landmarks.push_back(prev_landmarks[i]);
     result.object_points.push_back(prev_landmarks[i].p_cam);
     result.image_points.push_back(curr_points[i]);
     result.landmark_ids.push_back(prev_landmarks[i].id);

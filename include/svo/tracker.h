@@ -6,7 +6,6 @@
 #include <Eigen/Core>
 #include <opencv2/opencv.hpp>
 
-#include "svo/feature.h"
 #include "svo/frame.h"
 #include "svo/map_point.h"
 
@@ -16,9 +15,10 @@ struct TrackResult {
   std::vector<cv::Point2f> prev_points;
   std::vector<cv::Point2f> curr_points;
 
+  std::vector<MapPoint> tracked_landmarks;
+
   std::vector<Eigen::Vector3d> object_points;
   std::vector<cv::Point2f> image_points;
-
   std::vector<int> landmark_ids;
 
   cv::Mat track_vis;
@@ -45,7 +45,7 @@ public:
 
   TrackResult
   trackFrameToFrame(const Frame &prev_frame, const Frame &curr_frame,
-                    const std::vector<Feature> &prev_features,
+                    const std::vector<cv::Point2f> &prev_points,
                     const std::vector<MapPoint> &prev_landmarks) const;
 
 private:
