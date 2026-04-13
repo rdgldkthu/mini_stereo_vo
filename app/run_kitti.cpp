@@ -187,6 +187,7 @@ int main(int argc, char **argv) {
   stats << "0," << active_points_2d.size() << ",0,0,1\n";
 
   svo::Frame prev_frame = frame0;
+  int last_init_frame_id = 0;
 
   for (int frame_id = 1; frame_id < dataset.numFrames(); ++frame_id) {
     svo::Frame curr_frame;
@@ -221,8 +222,16 @@ int main(int argc, char **argv) {
       poses.push_back(poses.back());
     }
 
-    active_points_2d = track_result.curr_points;
-    active_landmarks = track_result.tracked_landmarks;
+    if ((frame_id - last_init_frame_id > 10) && (num_inliers < 12 || pose_success == false || track_result.curr_points.size() < 80)) {
+      std::cout << "Reinitializing at frame " << frame_id << "\n";
+      svo::StereoInitResult reinit_result = initializer.run(curr_frame, camera);
+      active_points_2d = makeInitialActivePoints(reinit_result);
+      active_landmarks = makeInitalActiveLandmarks(reinit_result);
+      last_init_frame_id = frame_id;
+    } else {
+      active_points_2d = track_result.curr_points;
+      active_landmarks = track_result.tracked_landmarks;
+    }
 
     stats << frame_id << "," << active_points_2d.size() << ","
           << track_result.num_valid_correspondences << "," << num_inliers << ","
