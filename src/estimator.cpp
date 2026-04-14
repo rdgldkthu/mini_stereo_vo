@@ -29,9 +29,9 @@ PoseEstimateResult Estimator::estimatePosePnPRansac(
   cv_object_points.reserve(object_points.size());
 
   for (const auto &p : object_points) {
-    cv_object_points.emplace_back(static_cast<int>(p.x()),
-                                  static_cast<int>(p.y()),
-                                  static_cast<int>(p.z()));
+    cv_object_points.emplace_back(static_cast<float>(p.x()),
+                                  static_cast<float>(p.y()),
+                                  static_cast<float>(p.z()));
   }
 
   const cv::Mat K = makeCameraMatrix(camera);

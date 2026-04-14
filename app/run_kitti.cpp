@@ -55,7 +55,7 @@ Eigen::Matrix4d makePoseWcFromPnP(const Eigen::Matrix3d &R_cw,
   Eigen::Matrix4d T_wc = Eigen::Matrix4d::Identity();
 
   const Eigen::Matrix3d R_wc = R_cw.transpose();
-  const Eigen::Vector3d t_wc = -R_cw * t_cw;
+  const Eigen::Vector3d t_wc = -R_wc * t_cw;
 
   T_wc.block<3, 3>(0, 0) = R_wc;
   T_wc.block<3, 1>(0, 3) = t_wc;
