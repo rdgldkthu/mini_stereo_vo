@@ -42,6 +42,14 @@ public:
                         const std::vector<cv::Point2f> &image_points,
                         const Camera &camera) const;
 
+  PoseEstimateResult
+  estimatePosePnPRansac(const std::vector<Eigen::Vector3d> &object_points,
+                        const std::vector<cv::Point2f> &image_points,
+                        const Camera &camera,
+                        const Eigen::Matrix3d &initial_rotation_cw,
+                        const Eigen::Vector3d &initial_translation_cw,
+                        bool use_initial_guess) const;
+
 private:
   cv::Mat makeCameraMatrix(const Camera &camera) const;
 
