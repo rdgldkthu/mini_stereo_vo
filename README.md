@@ -27,7 +27,7 @@ The system successfully runs through full KITTI sequences using:
 
 ### Trajectory Visualization
 
-![Trajectory](results/videos/traj_05_260415.png)
+![Trajectory](assets/traj_05_260415.png)
 
 - Ground truth: smooth path
 - Estimated VO: follows overall structure but accumulates drift over time
