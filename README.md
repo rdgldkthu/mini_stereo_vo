@@ -1,107 +1,141 @@
 # mini_stereo_vo
 
-A from-scratch stereo visual odometry project in C++17 using the KITTI odometry dataset.
+A from-scratch stereo visual odometry (VO) system in C++ using the KITTI odometry dataset.
 
-## Goal
+## Overview
 
-Build a small and understandable stereo visual odometry system from scratch, with clean code structure, visual debugging, and quantitative evaluation.
+This project implements a minimal yet complete stereo visual odometry pipeline with:
 
-This project focuses on:
+- stereo initialization from rectified image pairs
+- feature tracking using optical flow
+- pose estimation with PnP + RANSAC
+- sequential VO with failure handling
+- stereo reinitialization for long-term robustness
+- trajectory evaluation using evo
 
-- understanding the full VO pipeline by implementing it directly
-- keeping the system small enough to finish
-- producing a clean portfolio-quality demo and repo
+The focus is on **clarity, correctness, and understanding**, rather than full SLAM completeness.
 
-## Current status
+---
 
-Implemented:
+## Current Results
 
-- KITTI stereo dataset loader
-- KITTI calibration parsing
-- rectified stereo triangulation helper
-- ORB-based stereo feature detection and matching
-- row/disparity filtering for stereo correspondences
-- initial sparse landmark triangulation from a stereo pair
-- debug visualization and statistics export
-- KITTI-format trajectory file export scaffold
+The system successfully runs through full KITTI sequences using:
 
-Not implemented yet:
+- frame-to-frame tracking
+- pose estimation with quality gating
+- automatic stereo reinitialization when tracking degrades
 
-- temporal tracking between frames
-- pose estimation with PnP
-- keyframe insertion
-- active map management
-- local optimization / bundle adjustment
+### Trajectory Visualization
+
+![Trajectory](results/videos/traj_05_260415.png)
+
+- Ground truth: smooth path
+- Estimated VO: follows overall structure but accumulates drift over time
+
+---
+
+## Pipeline
+
+### 1. Stereo Initialization
+
+- ORB feature detection and matching between left/right images
+- row and disparity filtering
+- triangulation of 3D landmarks
+- landmarks initialized in camera frame
+
+### 2. Tracking
+
+- features tracked across frames using pyramidal LK optical flow
+- forward-backward consistency check
+- invalid tracks filtered out
+
+### 3. Pose Estimation
+
+- 3D–2D correspondences constructed from tracked landmarks
+- pose estimated using `solvePnPRansac`
+- previous pose used as initial guess
+
+### 4. Pose Validation
+
+Pose is accepted only if:
+
+- sufficient inliers
+- sufficient inlier ratio
+- reasonable frame-to-frame motion
+
+Otherwise:
+
+- previous pose is reused
+- system enters degraded state
+
+### 5. Reinitialization
+
+Triggered when:
+
+- tracking quality drops
+- pose estimation fails or is rejected
+
+Behavior:
+
+- stereo reinitialization on current frame
+- new landmarks triangulated
+- transformed into world frame using last valid pose
+
+---
+
+## Limitations
+
+This is a **pure VO system**, not full SLAM.
+
+Missing components:
+
+- global map optimization (Bundle Adjustment)
 - loop closure
+- keyframe-based map refinement
+- landmark lifecycle management
 
-## Repository structure
+### Resulting Behavior
+
+- drift accumulates over time
+- trajectory remains locally consistent
+- global consistency is not enforced
+
+This is expected and correct for the current system design.
+
+---
+
+## Repository Structure
 
 ```text
-stereo-vo/
-├── app/
-│   └── run_kitti.cpp
-├── include/
-│   └── svo/
-│       ├── camera.h
-│       ├── dataset_kitti.h
-│       ├── feature.h
-│       ├── frame.h
-│       ├── map_point.h
-│       └── stereo_initializer.h
+mini_stereo_vo/
+├── include/svo/
+│   ├── camera.h
+│   ├── dataset_kitti.h
+│   ├── estimator.h
+│   ├── feature.h
+│   ├── frame.h
+│   ├── map_point.h
+│   ├── stereo_initializer.h
+│   └── tracker.h
 ├── src/
 │   ├── camera.cpp
 │   ├── dataset_kitti.cpp
-│   └── stereo_initializer.cpp
+│   ├── estimator.cpp
+│   ├── stereo_initializer.cpp
+│   ├── tracker.cpp
+├── app/
+│   └── run_kitti.cpp
+├── scripts/
+│   ├── bootstrap_ubuntu2404.sh
+│   └── eval_kitti.sh
 ├── results/
 │   ├── debug/
-│   └── traj/
-├── data/
-├── third_party/
-├── CMakeLists.txt
-└── README.md
+│   ├── tables/
+│   ├── traj/
+│   └── videos/
 ```
 
-## Dependencies
-
-System packages:
-
-- build-essential
-- cmake
-- ninja-build
-- OpenCV
-- Eigen
-
-Optional Python tools:
-
-- evo
-
-## Environment
-
-Target platform:
-
-- Ubuntu 24.04
-- C++17
-- CMake
-- OpenCV 4
-- Eigen 3
-
-## Dataset
-
-This project currently uses the KITTI odometry dataset with grayscale stereo images.
-
-Expected directory layout:
-
-```text
-data/kitti/
-├── poses/
-│   └── 05.txt
-└── sequences/
-    └── 05/
-        ├── calib.txt
-        ├── times.txt
-        ├── image_0/
-        └── image_1/
-```
+---
 
 ## Build
 
@@ -110,123 +144,67 @@ cmake -S . -B build -G Ninja
 cmake --build build -j
 ```
 
+---
+
 ## Run
 
 ```bash
-./build/run_kitti data/kitti 05 results/traj/05.txt
+./build/run_kitti data/kitti 05 results/traj/05_vo.txt
 ```
 
-## Current runtime behavior
+---
 
-The current executable does the following:
+## Evaluation
 
-1. opens a KITTI stereo sequence
-2. loads calibration from `calib.txt`
-3. loads the first stereo pair
-4. detects ORB features in left and right images
-5. matches stereo correspondences
-6. filters matches using row and disparity constraints
-7. triangulates initial 3D landmarks
-8. saves debug outputs
-9. writes a KITTI-format trajectory file scaffold
-
-## Output files
-
-After running, the following files are generated:
-
-```text
-results/debug/05_init_matches.png
-results/debug/05_init_stats.txt
-results/debug/05_init_points.txt
-results/traj/05.txt
+```bash
+scripts/eval_kitti.sh 05 results/traj/05_vo.txt
 ```
 
-### `05_init_matches.png`
+Produces:
 
-Stereo match visualization with summary statistics overlaid.
+- trajectory plots
+- APE (absolute pose error)
+- RPE (relative pose error)
 
-### `05_init_stats.txt`
+---
 
-Contains:
+## Key Observations
 
-- number of keypoints
-- number of raw matches
-- number of filtered matches
-- number of triangulated landmarks
-- disparity statistics
-- row error statistics
-- depth statistics
+- VO works reliably across full sequences
+- reinitialization prevents early failure
+- pose gating avoids catastrophic jumps
+- drift accumulates without global optimization
 
-### `05_init_points.txt`
+---
 
-Contains triangulated landmark data in the form:
+## Future Work
 
-```text
-id x y z ul vl ur vr disparity
-```
+### Short-term improvements
 
-### `05.txt`
+- better pose validation (reprojection error)
+- adaptive reinitialization thresholds
+- landmark quality filtering
 
-Current trajectory output is a placeholder identity trajectory written in KITTI pose format to keep the export/evaluation path ready.
+### Medium-term improvements
 
-## Current implementation notes
+- keyframe insertion
+- local bundle adjustment
+- landmark re-triangulation
 
-### Calibration
+### Long-term extensions
 
-The system parses KITTI projection matrices and extracts:
+- loop closure
+- pose graph optimization
+- full SLAM system
 
-- `fx`
-- `fy`
-- `cx`
-- `cy`
-- stereo baseline
-
-### Stereo geometry
-
-Because the KITTI stereo images are rectified, depth is recovered from disparity using:
-
-```text
-Z = fx * baseline / disparity
-X = (u - cx) * Z / fx
-Y = (v - cy) * Z / fy
-```
-
-### Stereo initialization
-
-The current stereo initializer:
-
-- uses ORB for feature detection and descriptor extraction
-- uses brute-force Hamming matching with cross-check
-- enforces row consistency
-- rejects invalid disparity ranges
-- triangulates a sparse set of valid landmarks
-
-## Limitations of the current version
-
-This is not yet full visual odometry.
-
-The system currently initializes landmarks from a single stereo pair, but it does not yet:
-
-- track them across time
-- estimate camera motion
-- maintain an active map
-- recover trajectory from frame-to-frame motion
-
-## Next steps
-
-Planned next components:
-
-- temporal feature tracking between consecutive left frames
-- 3D-2D correspondence construction
-- pose estimation with PnP + RANSAC
-- keyframe insertion policy
-- local map maintenance
-- trajectory visualization and evaluation
+---
 
 ## Notes
 
-This project intentionally prioritizes:
+This project is intentionally designed to:
 
-- clarity over feature completeness
-- direct implementation over wrapping a large SLAM framework
-- a finishable VO system over a broad but shallow keyword-driven project
+- prioritize understanding over complexity
+- build the VO pipeline step by step
+- expose real-world failure modes (drift, tracking loss, reinitialization)
+
+It is meant as a **learning-focused implementation of visual odometry**, not a production SLAM system.
