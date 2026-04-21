@@ -118,6 +118,25 @@ void writeKittiTrajectory(const std::filesystem::path &out_path,
   }
 }
 
+void gatherPnPInliers(
+  const std::vector<Eigen::Vector3d>& object_points,
+  const std::vector<cv::Point2f>& image_points,
+  const cv::Mat& inlier_indices,
+  std::vector<Eigen::Vector3d>& inlier_object_points,
+  std::vector<cv::Point2f>& inlier_image_points) {
+  inlier_object_points.clear();
+  inlier_image_points.clear();
+
+  for (int i = 0; i < inlier_indices.rows; i++) {
+    const int idx = inlier_indices.at<int>(i, 0);
+    if (idx < 0 || idx >= static_cast<int>(object_points.size())) {
+      continue;
+    }
+    inlier_object_points.push_back(object_points[idx]);
+    inlier_image_points.push_back(image_points[idx]);
+  }
+}
+
 int main(int argc, char **argv) {
   if (argc < 3 || argc > 4) {
     std::cerr << "Usage: " << argv[0]
@@ -216,9 +235,12 @@ int main(int argc, char **argv) {
 
   std::ofstream stats("results/debug/" + sequence + "_vo_stats.csv");
   stats << "frame_id,num_active_points,num_correspondences,num_inliers,"
-           "inlier_ratio,pose_success,pose_accepted,reinitialized,tx,ty,tz,"
-           "delta_t\n";
-  stats << "0," << active_points_2d.size() << ",0,0,0.0,1,1,0,0,0,0,0\n";
+           "inlier_ratio,pose_success,pose_accepted,reinitialized,"
+           "tx,ty,tz,delta_t,rmse_before,rmse_after\n";
+  stats << "0," << active_points_2d.size() << ",0,0,0.0,1,1,0,0,0,0,0,0,0\n";
+
+  double rmse_before = 0.0;
+  double rmse_after = 0.0;
 
   for (int frame_id = 1; frame_id < dataset.numFrames(); ++frame_id) {
     svo::Frame curr_frame;
@@ -227,7 +249,7 @@ int main(int argc, char **argv) {
       poses.push_back(poses.back());
       stats << frame_id << ",0,0,0,0.0,0,0,0,\n"
             << poses.back()(0, 3) << "," << poses.back()(1, 3) << ","
-            << poses.back()(2, 3) << ",0\n";
+            << poses.back()(2, 3) << ",0,0,0\n";
       continue;
     }
 
@@ -249,19 +271,37 @@ int main(int argc, char **argv) {
       Eigen::Vector3d init_t_cw = Eigen::Vector3d::Zero();
       makePoseCwFromPoseWc(poses.back(), init_R_cw, init_t_cw);
 
-      const svo::PoseEstimateResult pose_result =
+      const svo::PoseEstimateResult raw_pose_result =
           estimator.estimatePosePnPRansac(track_result.object_points,
                                           track_result.image_points, camera,
                                           init_R_cw, init_t_cw, true);
 
-      if (pose_result.success) {
+      if (raw_pose_result.success) {
         pose_success = true;
-        num_inliers = pose_result.num_inliers;
+        num_inliers = raw_pose_result.num_inliers;
         inlier_ratio = static_cast<double>(num_inliers) /
                        std::max(1, track_result.num_valid_correspondences);
 
+        svo::PoseEstimateResult final_pose_result = raw_pose_result;
+
+        if (raw_pose_result.num_inliers >= estimator_options.min_refine_inliers) {
+          std::vector<Eigen::Vector3d> inlier_object_points;
+          std::vector<cv::Point2f> inlier_image_points;
+          gatherPnPInliers(track_result.object_points, track_result.image_points, raw_pose_result.inlier_indices, inlier_object_points, inlier_image_points);
+
+          const svo::PoseEstimateResult refined_pose_result = estimator.refinePosePoseOnly(inlier_object_points, inlier_image_points, camera, raw_pose_result.rotation, raw_pose_result.translation);
+
+          if (refined_pose_result.success) {
+            final_pose_result = refined_pose_result;
+            num_inliers = refined_pose_result.num_inliers;
+          }
+        }
+
+        rmse_before = raw_pose_result.reprojection_rmse_before;
+        rmse_after = final_pose_result.reprojection_rmse_after;
+
         candidate_pose =
-            makePoseWcFromPnP(pose_result.rotation, pose_result.translation);
+            makePoseWcFromPnP(final_pose_result.rotation, final_pose_result.translation);
 
         const Eigen::Vector3d t_prev = poses.back().block<3, 1>(0, 3);
         const Eigen::Vector3d t_curr = candidate_pose.block<3, 1>(0, 3);
@@ -280,6 +320,12 @@ int main(int argc, char **argv) {
           consecutive_rejected_poses++;
           dense_debug_center = frame_id;
         }
+
+        std::cout << "  refine rmse: "
+                  << raw_pose_result.reprojection_rmse_before
+                  << " -> "
+                  << final_pose_result.reprojection_rmse_after
+                  << "\n";
       } else {
         poses.push_back(poses.back());
         consecutive_rejected_poses++;
@@ -328,7 +374,7 @@ int main(int argc, char **argv) {
           << inlier_ratio << "," << (pose_success ? 1 : 0) << ","
           << (pose_accepted ? 1 : 0) << "," << (reinitialized ? 1 : 0) << ","
           << t_out(0) << "," << t_out(1) << "," << t_out(2) << "," << delta_t
-          << "\n";
+          << "," << rmse_before << "," << rmse_after << "\n";
 
     const bool save_sparse_debug = (frame_id % 10 == 0);
     const bool save_dense_debug =
