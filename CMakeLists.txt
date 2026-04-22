@@ -16,9 +16,11 @@ find_package(OpenCV REQUIRED COMPONENTS core imgcodecs imgproc highgui features2
 add_library(svo_core
   src/camera.cpp
   src/dataset_kitti.cpp
+  src/estimator.cpp
+  src/frontend.cpp
+  src/map.cpp
   src/stereo_initializer.cpp
   src/tracker.cpp
-  src/estimator.cpp
 )
 
 target_include_directories(svo_core

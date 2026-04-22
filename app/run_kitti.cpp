@@ -14,6 +14,8 @@
 #include "svo/dataset_kitti.h"
 #include "svo/estimator.h"
 #include "svo/frame.h"
+#include "svo/frontend.h"
+#include "svo/map.h"
 #include "svo/map_point.h"
 #include "svo/stereo_initializer.h"
 #include "svo/tracker.h"
@@ -118,12 +120,11 @@ void writeKittiTrajectory(const std::filesystem::path &out_path,
   }
 }
 
-void gatherPnPInliers(
-  const std::vector<Eigen::Vector3d>& object_points,
-  const std::vector<cv::Point2f>& image_points,
-  const cv::Mat& inlier_indices,
-  std::vector<Eigen::Vector3d>& inlier_object_points,
-  std::vector<cv::Point2f>& inlier_image_points) {
+void gatherPnPInliers(const std::vector<Eigen::Vector3d> &object_points,
+                      const std::vector<cv::Point2f> &image_points,
+                      const cv::Mat &inlier_indices,
+                      std::vector<Eigen::Vector3d> &inlier_object_points,
+                      std::vector<cv::Point2f> &inlier_image_points) {
   inlier_object_points.clear();
   inlier_image_points.clear();
 
@@ -224,9 +225,36 @@ int main(int argc, char **argv) {
   estimator_options.min_pnp_points = 6;
   svo::Estimator estimator(estimator_options);
 
+  svo::Frontend::Options frontend_options;
+  frontend_options.keyframe_translation_threshold_m = 1.5;
+  frontend_options.keyframe_rotation_threshold_deg = 12.0;
+  frontend_options.keyframe_min_tracked_points = 60;
+  frontend_options.keyframe_min_frame_gap = 15;
+  frontend_options.keyframe_low_track_translation_threshold_m = 0.5;
+  svo::Frontend frontend(frontend_options);
+
+  svo::Map::Options map_options;
+  map_options.max_active_keyframes = 5;
+  svo::Map map(map_options);
+
   std::vector<Eigen::Matrix4d> poses;
   poses.reserve(dataset.numFrames());
   poses.push_back(Eigen::Matrix4d::Identity());
+
+  frame0.pose_wc = Eigen::Matrix4d::Identity();
+  frame0.is_keyframe = true;
+  frame0.tracked_points = active_points_2d;
+  frame0.tracked_landmark_ids.clear();
+  frame0.tracked_landmark_ids.reserve(active_landmarks.size());
+  for (const auto &landmark : active_landmarks) {
+    frame0.tracked_landmark_ids.push_back(landmark.id);
+  }
+
+  map.addKeyframe(frame0);
+  map.setActiveLandmarks(active_landmarks);
+
+  int last_keyframe_frame_id = 0;
+  Eigen::Matrix4d last_keyframe_pose_wc = frame0.pose_wc;
 
   svo::Frame prev_frame = frame0;
   int last_init_frame_id = 0;
@@ -235,9 +263,10 @@ int main(int argc, char **argv) {
 
   std::ofstream stats("results/debug/" + sequence + "_vo_stats.csv");
   stats << "frame_id,num_active_points,num_correspondences,num_inliers,"
-           "inlier_ratio,pose_success,pose_accepted,reinitialized,"
-           "tx,ty,tz,delta_t,rmse_before,rmse_after\n";
-  stats << "0," << active_points_2d.size() << ",0,0,0.0,1,1,0,0,0,0,0,0,0\n";
+           "inlier_ratio,pose_success,pose_accepted,reinitialized,is_keyframe,"
+           "num_keyframes,tx,ty,tz,delta_t,rmse_before,rmse_after\n";
+  stats << "0," << active_points_2d.size() << ",0,0,0.0,1,1,0,1,"
+        << map.numActiveKeyframes() << ",0,0,0,0,0,0\n";
 
   double rmse_before = 0.0;
   double rmse_after = 0.0;
@@ -247,9 +276,9 @@ int main(int argc, char **argv) {
     if (!dataset.loadFrame(frame_id, curr_frame)) {
       std::cerr << "Failed to load frame " << frame_id << "\n";
       poses.push_back(poses.back());
-      stats << frame_id << ",0,0,0,0.0,0,0,0,\n"
-            << poses.back()(0, 3) << "," << poses.back()(1, 3) << ","
-            << poses.back()(2, 3) << ",0,0,0\n";
+      stats << frame_id << ",0,0,0,0.0,0,0,0,0,\n"
+            << map.numActiveKeyframes() << "," << poses.back()(0, 3) << ","
+            << poses.back()(1, 3) << "," << poses.back()(2, 3) << ",0,0,0\n";
       continue;
     }
 
@@ -284,12 +313,19 @@ int main(int argc, char **argv) {
 
         svo::PoseEstimateResult final_pose_result = raw_pose_result;
 
-        if (raw_pose_result.num_inliers >= estimator_options.min_refine_inliers) {
+        if (raw_pose_result.num_inliers >=
+            estimator_options.min_refine_inliers) {
           std::vector<Eigen::Vector3d> inlier_object_points;
           std::vector<cv::Point2f> inlier_image_points;
-          gatherPnPInliers(track_result.object_points, track_result.image_points, raw_pose_result.inlier_indices, inlier_object_points, inlier_image_points);
+          gatherPnPInliers(track_result.object_points,
+                           track_result.image_points,
+                           raw_pose_result.inlier_indices, inlier_object_points,
+                           inlier_image_points);
 
-          const svo::PoseEstimateResult refined_pose_result = estimator.refinePosePoseOnly(inlier_object_points, inlier_image_points, camera, raw_pose_result.rotation, raw_pose_result.translation);
+          const svo::PoseEstimateResult refined_pose_result =
+              estimator.refinePosePoseOnly(
+                  inlier_object_points, inlier_image_points, camera,
+                  raw_pose_result.rotation, raw_pose_result.translation);
 
           if (refined_pose_result.success) {
             final_pose_result = refined_pose_result;
@@ -300,8 +336,8 @@ int main(int argc, char **argv) {
         rmse_before = raw_pose_result.reprojection_rmse_before;
         rmse_after = final_pose_result.reprojection_rmse_after;
 
-        candidate_pose =
-            makePoseWcFromPnP(final_pose_result.rotation, final_pose_result.translation);
+        candidate_pose = makePoseWcFromPnP(final_pose_result.rotation,
+                                           final_pose_result.translation);
 
         const Eigen::Vector3d t_prev = poses.back().block<3, 1>(0, 3);
         const Eigen::Vector3d t_curr = candidate_pose.block<3, 1>(0, 3);
@@ -322,10 +358,8 @@ int main(int argc, char **argv) {
         }
 
         std::cout << "  refine rmse: "
-                  << raw_pose_result.reprojection_rmse_before
-                  << " -> "
-                  << final_pose_result.reprojection_rmse_after
-                  << "\n";
+                  << raw_pose_result.reprojection_rmse_before << " -> "
+                  << final_pose_result.reprojection_rmse_after << "\n";
       } else {
         poses.push_back(poses.back());
         consecutive_rejected_poses++;
@@ -335,6 +369,34 @@ int main(int argc, char **argv) {
       poses.push_back(poses.back());
       consecutive_rejected_poses++;
       dense_debug_center = frame_id;
+    }
+
+    bool inserted_keyframe = false;
+
+    if (pose_accepted) {
+      curr_frame.pose_wc = poses.back();
+      curr_frame.tracked_points = active_points_2d;
+      curr_frame.tracked_landmark_ids.clear();
+      curr_frame.tracked_landmark_ids.reserve(active_landmarks.size());
+      for (const auto &landmark : active_landmarks) {
+        curr_frame.tracked_landmark_ids.push_back(landmark.id);
+      }
+
+      if (frontend.needNewKeyframe(last_keyframe_pose_wc, curr_frame.pose_wc,
+                                   static_cast<int>(active_points_2d.size()),
+                                   frame_id, last_keyframe_frame_id)) {
+        curr_frame.is_keyframe = true;
+        map.addKeyframe(curr_frame);
+        map.setActiveLandmarks(active_landmarks);
+
+        last_keyframe_frame_id = frame_id;
+        last_keyframe_pose_wc = curr_frame.pose_wc;
+        inserted_keyframe = true;
+
+        std::cout << "Inserted keyframe at frame " << frame_id
+                  << " | active keyframes: " << map.numActiveKeyframes()
+                  << "\n";
+      }
     }
 
     const bool weak_but_accepted =
@@ -373,8 +435,9 @@ int main(int argc, char **argv) {
           << track_result.num_valid_correspondences << "," << num_inliers << ","
           << inlier_ratio << "," << (pose_success ? 1 : 0) << ","
           << (pose_accepted ? 1 : 0) << "," << (reinitialized ? 1 : 0) << ","
-          << t_out(0) << "," << t_out(1) << "," << t_out(2) << "," << delta_t
-          << "," << rmse_before << "," << rmse_after << "\n";
+          << (inserted_keyframe ? 1 : 0) << "," << map.numActiveKeyframes()
+          << "," << t_out(0) << "," << t_out(1) << "," << t_out(2) << ","
+          << delta_t << "," << rmse_before << "," << rmse_after << "\n";
 
     const bool save_sparse_debug = (frame_id % 10 == 0);
     const bool save_dense_debug =
