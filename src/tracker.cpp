@@ -84,7 +84,7 @@ Tracker::trackFrameToFrame(const Frame &prev_frame, const Frame &curr_frame,
     result.prev_points.push_back(prev_points[i]);
     result.curr_points.push_back(curr_points[i]);
     result.tracked_landmarks.push_back(prev_landmarks[i]);
-    result.object_points.push_back(prev_landmarks[i].p_cam);
+    result.object_points.push_back(prev_landmarks[i].p_w);
     result.image_points.push_back(curr_points[i]);
     result.landmark_ids.push_back(prev_landmarks[i].id);
     result.num_valid_correspondences++;

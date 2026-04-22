@@ -132,7 +132,7 @@ StereoInitResult StereoInitializer::run(const Frame &frame,
 
     MapPoint mp;
     mp.id = landmark_id++;
-    mp.p_cam = p_c;
+    mp.p_w = p_c;
     mp.descriptor = desc_left.row(m.queryIdx).clone();
     result.landmarks.push_back(mp);
 

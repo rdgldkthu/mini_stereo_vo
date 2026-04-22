@@ -8,8 +8,17 @@ namespace svo {
 
 struct MapPoint {
   int id = -1;
-  Eigen::Vector3d p_cam = Eigen::Vector3d::Zero(); // left camera frame
-  cv::Mat descriptor;                              // descriptor from left image
+
+  Eigen::Vector3d p_w = Eigen::Vector3d::Zero();
+
+  cv::Mat descriptor;
+
+  int observed_times = 0;
+  int tracked_times = 0;
+  int missed_times = 0;
+
+  bool is_outlier = false;
+  bool is_active = true;
 };
 
 } // namespace svo
