@@ -6,6 +6,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <Eigen/Core>
@@ -146,6 +147,31 @@ bool isInDebugWindow(int frame_id, int center, int radius) {
   return std::abs(frame_id - center) <= radius;
 }
 
+std::vector<svo::MapPoint> refreshTrackedLandmarksFromMap(
+    const std::vector<svo::MapPoint> &tracked_landmarks,
+    const std::vector<svo::MapPoint> &map_landmarks) {
+  std::unordered_map<int, svo::MapPoint> id_to_landmark;
+  id_to_landmark.reserve(map_landmarks.size());
+
+  for (const auto &landmark : map_landmarks) {
+    id_to_landmark[landmark.id] = landmark;
+  }
+
+  std::vector<svo::MapPoint> refreshed;
+  refreshed.reserve(tracked_landmarks.size());
+
+  for (const auto &landmark : tracked_landmarks) {
+    const auto it = id_to_landmark.find(landmark.id);
+    if (it != id_to_landmark.end()) {
+      refreshed.push_back(it->second);
+    } else {
+      refreshed.push_back(landmark);
+    }
+  }
+
+  return refreshed;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -217,13 +243,19 @@ int main(int argc, char **argv) {
   estimator_options.pose_refine_epsilon = 1e-6;
   estimator_options.pose_refine_huber_delta = 5.0;
   estimator_options.min_refine_inliers = 10;
+  estimator_options.local_ba_iterations = 3;
+  estimator_options.local_ba_epsilon = 1e-6;
+  estimator_options.local_ba_huber_delta = 5.0;
+  estimator_options.max_ba_keyframes = 3;
+  estimator_options.max_ba_landmarks = 60;
+  estimator_options.min_ba_observations = 25;
   svo::Estimator estimator(estimator_options);
 
   svo::Frontend::Options frontend_options;
   frontend_options.keyframe_translation_threshold_m = 1.5;
   frontend_options.keyframe_rotation_threshold_deg = 12.0;
   frontend_options.keyframe_min_tracked_points = 60;
-  frontend_options.keyframe_min_frame_gap = 15;
+  frontend_options.keyframe_min_frame_gap = 5;
   frontend_options.keyframe_low_track_translation_threshold_m = 0.5;
   svo::Frontend frontend(frontend_options);
 
@@ -262,6 +294,7 @@ int main(int argc, char **argv) {
       makeInitialActivePoints(init_result);
   std::vector<svo::MapPoint> active_landmarks =
       makeInitialActiveLandmarks(init_result);
+  map.assignNewLandmarkIds(active_landmarks);
 
   // frame 0 defines world frame
   frame0.pose_wc = Eigen::Matrix4d::Identity();
@@ -297,12 +330,12 @@ int main(int argc, char **argv) {
   std::ofstream stats("results/debug/" + sequence + "_vo_stats.csv");
   stats << "frame_id,num_active_points,num_correspondences,num_inliers,"
            "inlier_ratio,pose_success,pose_accepted,reinitialized,is_keyframe,"
-           "num_keyframes,num_map_landmarks,tx,ty,tz,delta_t,rmse_before,rmse_"
-           "after\n";
+           "num_keyframes,num_map_landmarks,local_ba,ba_rmse_before,ba_rmse_"
+           "after,tx,ty,tz,delta_t,rmse_before,rmse_after\n";
 
   stats << "0," << active_points_2d.size() << ",0,0,0.0,1,1,0,1,"
-        << map.numActiveKeyframes() << "," << map.numActiveLandmarks()
-        << ",0,0,0,0,0,0\n";
+        << map.numActiveKeyframes() << "," << map.numActiveLandmarks() << ","
+        << "0,0,0,0,0,0,0,0,0\n";
 
   // -------------------------------------------------------------------------
   // Main VO loop
@@ -327,12 +360,15 @@ int main(int argc, char **argv) {
     bool pose_accepted = false;
     bool reinitialized = false;
     bool inserted_keyframe = false;
+    bool ran_local_ba = false;
 
     int num_inliers = 0;
     double inlier_ratio = 0.0;
     double delta_t = 0.0;
     double rmse_before = 0.0;
     double rmse_after = 0.0;
+    double ba_rmse_before = 0.0;
+    double ba_rmse_after = 0.0;
 
     Eigen::Matrix4d candidate_pose = poses.back();
 
@@ -431,8 +467,11 @@ int main(int argc, char **argv) {
 
       if (reinit_result.num_triangulated >= 20) {
         active_points_2d = makeInitialActivePoints(reinit_result);
-        active_landmarks = transformLandmarksToWorld(
-            makeInitialActiveLandmarks(reinit_result), poses.back());
+
+        std::vector<svo::MapPoint> new_landmarks = makeInitialActiveLandmarks(reinit_result);
+        map.assignNewLandmarkIds(new_landmarks);
+
+        active_landmarks = transformLandmarksToWorld(new_landmarks, poses.back());
 
         map.setActiveLandmarks(active_landmarks);
 
@@ -477,15 +516,42 @@ int main(int argc, char **argv) {
             initializer.run(curr_frame, camera);
 
         if (keyframe_init_result.num_triangulated >= 20) {
-          std::vector<svo::MapPoint> new_landmarks = transformLandmarksToWorld(
-              makeInitialActiveLandmarks(keyframe_init_result),
-              curr_frame.pose_wc);
+          std::vector<svo::MapPoint> new_landmarks = makeInitialActiveLandmarks(keyframe_init_result);
+          map.assignNewLandmarkIds(new_landmarks);
+
+          new_landmarks = transformLandmarksToWorld(new_landmarks, curr_frame.pose_wc);
 
           map.addLandmarks(new_landmarks);
 
-          // Refresh the active tracking set from the new keyframe
           active_points_2d = makeInitialActivePoints(keyframe_init_result);
           active_landmarks = new_landmarks;
+        }
+
+        // -------------------------
+        // Local bundle adjustment
+        // -------------------------
+        if (map.numActiveKeyframes() >= 2 && map.numActiveLandmarks() >= 20) {
+          svo::LocalBAResult ba_result = estimator.runLocalBundleAdjustment(
+              map.mutableActiveKeyframes(), map.mutableActiveLandmarks(),
+              camera);
+
+          if (ba_result.success) {
+            ran_local_ba = true;
+            ba_rmse_before = ba_result.rmse_before;
+            ba_rmse_after = ba_result.rmse_after;
+
+            // refresh the current active tracked landmarks using optimized map
+            // positions
+            active_landmarks = refreshTrackedLandmarksFromMap(
+                active_landmarks, map.activeLandmarks());
+
+            std::cout << "Local BA at frame " << frame_id
+                      << " | keyframes: " << ba_result.num_keyframes
+                      << " | landmarks: " << ba_result.num_landmarks
+                      << " | observations: " << ba_result.num_observations
+                      << " | rmse: " << ba_result.rmse_before << " -> "
+                      << ba_result.rmse_after << "\n";
+          }
         }
 
         last_keyframe_frame_id = frame_id;
@@ -509,9 +575,10 @@ int main(int argc, char **argv) {
           << inlier_ratio << "," << (pose_success ? 1 : 0) << ","
           << (pose_accepted ? 1 : 0) << "," << (reinitialized ? 1 : 0) << ","
           << (inserted_keyframe ? 1 : 0) << "," << map.numActiveKeyframes()
-          << "," << map.numActiveLandmarks() << "," << t_out(0) << ","
-          << t_out(1) << "," << t_out(2) << "," << delta_t << "," << rmse_before
-          << "," << rmse_after << "\n";
+          << "," << map.numActiveLandmarks() << "," << (ran_local_ba ? 1 : 0)
+          << "," << ba_rmse_before << "," << ba_rmse_after << "," << t_out(0)
+          << "," << t_out(1) << "," << t_out(2) << "," << delta_t << ","
+          << rmse_before << "," << rmse_after << "\n";
 
     const bool save_sparse_debug = (frame_id % 10 == 0);
     const bool save_dense_debug =

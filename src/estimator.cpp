@@ -42,7 +42,9 @@ double huberWeight(double squared_error, double delta) {
   return delta / error;
 }
 
-bool projectPoint(const Eigen::Vector3d& p_w, const Eigen::Matrix3d& R_cw, const Eigen::Vector3d& t_cw, const Camera& camera, Eigen::Vector2d& pixel, Eigen::Vector3d& p_c) {
+bool projectPoint(const Eigen::Vector3d &p_w, const Eigen::Matrix3d &R_cw,
+                  const Eigen::Vector3d &t_cw, const Camera &camera,
+                  Eigen::Vector2d &pixel, Eigen::Vector3d &p_c) {
   p_c = R_cw * p_w + t_cw;
   if (p_c.z() <= 1e-8) {
     return false;
@@ -57,11 +59,11 @@ bool projectPoint(const Eigen::Vector3d& p_w, const Eigen::Matrix3d& R_cw, const
   return true;
 }
 
-double computeReprojectionRmse(const std::vector<Eigen::Vector3d>& object_points,
-const std::vector<cv::Point2f>& image_points,
-const Camera& camera,
-const Eigen::Matrix3d& R_cw,
-const Eigen::Vector3d& t_cw) {
+double
+computeReprojectionRmse(const std::vector<Eigen::Vector3d> &object_points,
+                        const std::vector<cv::Point2f> &image_points,
+                        const Camera &camera, const Eigen::Matrix3d &R_cw,
+                        const Eigen::Vector3d &t_cw) {
   if (object_points.empty() || object_points.size() != image_points.size()) {
     return 0.0;
   }
@@ -79,6 +81,45 @@ const Eigen::Vector3d& t_cw) {
     const Eigen::Vector2d obs(image_points[i].x, image_points[i].y);
     const Eigen::Vector2d err = obs - proj;
     sum_sq += err.squaredNorm();
+    count++;
+  }
+
+  if (count == 0) {
+    return 0.0;
+  }
+
+  return std::sqrt(sum_sq / static_cast<double>(count));
+}
+
+struct LocalBAObservation {
+  int keyframe_index = -1;
+  int landmark_index = -1;
+  Eigen::Vector2d pixel = Eigen::Vector2d::Zero();
+};
+
+double computeLocalBaRmse(const std::vector<Eigen::Matrix3d> &rotations_cw,
+                          const std::vector<Eigen::Vector3d> &translations_cw,
+                          const std::vector<Eigen::Vector3d> &points_w,
+                          const std::vector<LocalBAObservation> &observations,
+                          const Camera &camera) {
+  if (observations.empty()) {
+    return 0.0;
+  }
+
+  double sum_sq = 0.0;
+  int count = 0;
+
+  for (const auto &obs : observations) {
+    Eigen::Vector2d proj;
+    Eigen::Vector3d p_c;
+    if (!projectPoint(points_w[obs.landmark_index],
+                      rotations_cw[obs.keyframe_index],
+                      translations_cw[obs.keyframe_index], camera, proj, p_c)) {
+      continue;
+    }
+
+    const Eigen::Vector2d e = obs.pixel - proj;
+    sum_sq += e.squaredNorm();
     count++;
   }
 
@@ -184,18 +225,18 @@ PoseEstimateResult Estimator::estimatePosePnPRansac(
   result.rotation = R;
   result.translation = t;
   result.num_inliers = inliers.rows;
-  result.reprojection_rmse_before = computeReprojectionRmse(object_points, image_points, camera, R, t);
+  result.reprojection_rmse_before =
+      computeReprojectionRmse(object_points, image_points, camera, R, t);
   result.reprojection_rmse_after = result.reprojection_rmse_before;
 
   return result;
 }
 
-PoseEstimateResult
-Estimator::refinePosePoseOnly(const std::vector<Eigen::Vector3d> &object_points,
-                              const std::vector<cv::Point2f> &image_points,
-                              const Camera &camera,
-                              const Eigen::Matrix3d &initial_rotation_cw,
-                              const Eigen::Vector3d &initial_translation_cw) const {
+PoseEstimateResult Estimator::refinePosePoseOnly(
+    const std::vector<Eigen::Vector3d> &object_points,
+    const std::vector<cv::Point2f> &image_points, const Camera &camera,
+    const Eigen::Matrix3d &initial_rotation_cw,
+    const Eigen::Vector3d &initial_translation_cw) const {
   PoseEstimateResult result;
   result.num_object_points = static_cast<int>(object_points.size());
   result.num_image_points = static_cast<int>(image_points.size());
@@ -210,7 +251,8 @@ Estimator::refinePosePoseOnly(const std::vector<Eigen::Vector3d> &object_points,
   Eigen::Matrix3d R_cw = initial_rotation_cw;
   Eigen::Vector3d t_cw = initial_translation_cw;
 
-  result.reprojection_rmse_before = computeReprojectionRmse(object_points, image_points, camera, R_cw, t_cw);
+  result.reprojection_rmse_before =
+      computeReprojectionRmse(object_points, image_points, camera, R_cw, t_cw);
 
   double last_cost = std::numeric_limits<double>::max();
 
@@ -237,8 +279,8 @@ Estimator::refinePosePoseOnly(const std::vector<Eigen::Vector3d> &object_points,
       const double z2 = z * z;
 
       Eigen::Matrix<double, 2, 3> J_proj;
-      J_proj << camera.fy / z, 0.0, -camera.fx * x / z2,
-      0.0, camera.fy / z, -camera.fy * y / z2;
+      J_proj << camera.fy / z, 0.0, -camera.fx * x / z2, 0.0, camera.fy / z,
+          -camera.fy * y / z2;
 
       Eigen::Matrix<double, 3, 6> J_pc_xi;
       J_pc_xi.block<3, 3>(0, 0) = -hat(p_c);
@@ -246,7 +288,8 @@ Estimator::refinePosePoseOnly(const std::vector<Eigen::Vector3d> &object_points,
 
       const Eigen::Matrix<double, 2, 6> J = J_proj * J_pc_xi;
 
-      const double w = huberWeight(e.squaredNorm(), options_.pose_refine_huber_delta);
+      const double w =
+          huberWeight(e.squaredNorm(), options_.pose_refine_huber_delta);
 
       H += w * J.transpose() * J;
       b += w * J.transpose() * e;
@@ -284,12 +327,12 @@ Estimator::refinePosePoseOnly(const std::vector<Eigen::Vector3d> &object_points,
   result.rotation = R_cw;
   result.translation = t_cw;
   result.num_inliers = static_cast<int>(object_points.size());
-  result.reprojection_rmse_after = computeReprojectionRmse(object_points, image_points, camera, R_cw, t_cw);
+  result.reprojection_rmse_after =
+      computeReprojectionRmse(object_points, image_points, camera, R_cw, t_cw);
 
-  cv::Mat R_cv = (cv::Mat_<double>(3, 3) <<
-  R_cw(0,0), R_cw(0,1), R_cw(0, 2),
-  R_cw(1,0), R_cw(1,1), R_cw(1, 2),
-  R_cw(2,0), R_cw(2,1), R_cw(2, 2));
+  cv::Mat R_cv =
+      (cv::Mat_<double>(3, 3) << R_cw(0, 0), R_cw(0, 1), R_cw(0, 2), R_cw(1, 0),
+       R_cw(1, 1), R_cw(1, 2), R_cw(2, 0), R_cw(2, 1), R_cw(2, 2));
   cv::Rodrigues(R_cv, result.rvec);
 
   result.tvec = cv::Mat::zeros(3, 1, CV_64F);
@@ -297,6 +340,258 @@ Estimator::refinePosePoseOnly(const std::vector<Eigen::Vector3d> &object_points,
   result.tvec.at<double>(1, 0) = t_cw(1);
   result.tvec.at<double>(2, 0) = t_cw(2);
 
+  return result;
+}
+
+LocalBAResult
+Estimator::runLocalBundleAdjustment(std::vector<Frame> &keyframes,
+                                    std::vector<MapPoint> &landmarks,
+                                    const Camera &camera) const {
+  LocalBAResult result;
+
+  if (keyframes.size() < 2 || landmarks.empty()) {
+    return result;
+  }
+
+  // -------------------------------------------------------------------------
+  // Select recent keyframes
+  // -------------------------------------------------------------------------
+  const int kf_count =
+      std::min(static_cast<int>(keyframes.size()), options_.max_ba_keyframes);
+
+  std::vector<Frame *> ba_keyframes;
+  ba_keyframes.reserve(kf_count);
+
+  for (int i = static_cast<int>(keyframes.size()) - kf_count;
+       i < static_cast<int>(keyframes.size()); ++i) {
+    ba_keyframes.push_back(&keyframes[i]);
+  }
+
+  // -------------------------------------------------------------------------
+  // Build landmark lookup
+  // -------------------------------------------------------------------------
+  std::unordered_map<int, int> landmark_id_to_global_index;
+  landmark_id_to_global_index.reserve(landmarks.size());
+  for (int i = 0; i < static_cast<int>(landmarks.size()); ++i) {
+    landmark_id_to_global_index[landmarks[i].id] = i;
+  }
+
+  // -------------------------------------------------------------------------
+  // Gather observations from keyframes
+  // -------------------------------------------------------------------------
+  std::unordered_map<int, int> global_landmark_to_local;
+  std::vector<int> local_to_global_landmark;
+  std::vector<LocalBAObservation> observations;
+
+  for (int kf_idx = 0; kf_idx < static_cast<int>(ba_keyframes.size());
+       ++kf_idx) {
+    const Frame &frame = *ba_keyframes[kf_idx];
+    const int n = std::min(static_cast<int>(frame.tracked_points.size()),
+                           static_cast<int>(frame.tracked_landmark_ids.size()));
+
+    for (int i = 0; i < n; ++i) {
+      const int landmark_id = frame.tracked_landmark_ids[i];
+      const auto it = landmark_id_to_global_index.find(landmark_id);
+      if (it == landmark_id_to_global_index.end()) {
+        continue;
+      }
+
+      const int global_idx = it->second;
+
+      auto local_it = global_landmark_to_local.find(global_idx);
+      int local_idx = -1;
+      if (local_it == global_landmark_to_local.end()) {
+        if (static_cast<int>(local_to_global_landmark.size()) >=
+            options_.max_ba_landmarks) {
+          continue;
+        }
+        local_idx = static_cast<int>(local_to_global_landmark.size());
+        global_landmark_to_local[global_idx] = local_idx;
+        local_to_global_landmark.push_back(global_idx);
+      } else {
+        local_idx = local_it->second;
+      }
+
+      LocalBAObservation obs;
+      obs.keyframe_index = kf_idx;
+      obs.landmark_index = local_idx;
+      obs.pixel =
+          Eigen::Vector2d(frame.tracked_points[i].x, frame.tracked_points[i].y);
+      observations.push_back(obs);
+    }
+  }
+
+  if (static_cast<int>(observations.size()) < options_.min_ba_observations) {
+    return result;
+  }
+
+  // -------------------------------------------------------------------------
+  // Initialize parameter blocks
+  // -------------------------------------------------------------------------
+  const int num_keyframes = static_cast<int>(ba_keyframes.size());
+  const int num_landmarks = static_cast<int>(local_to_global_landmark.size());
+
+  std::vector<Eigen::Matrix3d> rotations_cw(num_keyframes);
+  std::vector<Eigen::Vector3d> translations_cw(num_keyframes);
+  std::vector<Eigen::Vector3d> points_w(num_landmarks);
+
+  for (int k = 0; k < num_keyframes; ++k) {
+    const Eigen::Matrix4d &T_wc = ba_keyframes[k]->pose_wc;
+    const Eigen::Matrix3d R_wc = T_wc.block<3, 3>(0, 0);
+    const Eigen::Vector3d t_wc = T_wc.block<3, 1>(0, 3);
+
+    rotations_cw[k] = R_wc.transpose();
+    translations_cw[k] = -rotations_cw[k] * t_wc;
+  }
+
+  for (int j = 0; j < num_landmarks; ++j) {
+    points_w[j] = landmarks[local_to_global_landmark[j]].p_w;
+  }
+
+  result.rmse_before = computeLocalBaRmse(rotations_cw, translations_cw,
+                                          points_w, observations, camera);
+
+  // -------------------------------------------------------------------------
+  // Dense Gauss-Newton
+  // Fix first keyframe pose to remove gauge freedom.
+  // Param layout:
+  //   poses 1..K-1 : 6 each
+  //   landmarks 0..P-1 : 3 each
+  // -------------------------------------------------------------------------
+  const int pose_dim = 6 * (num_keyframes - 1);
+  const int point_dim = 3 * num_landmarks;
+  const int total_dim = pose_dim + point_dim;
+
+  if (total_dim <= 0) {
+    return result;
+  }
+
+  double last_cost = std::numeric_limits<double>::max();
+
+  for (int iter = 0; iter < options_.local_ba_iterations; ++iter) {
+    Eigen::MatrixXd H = Eigen::MatrixXd::Zero(total_dim, total_dim);
+    Eigen::VectorXd b = Eigen::VectorXd::Zero(total_dim);
+
+    double cost = 0.0;
+    int valid_obs = 0;
+
+    for (const auto &obs : observations) {
+      const int kf_idx = obs.keyframe_index;
+      const int lm_idx = obs.landmark_index;
+
+      Eigen::Vector2d proj;
+      Eigen::Vector3d p_c;
+      if (!projectPoint(points_w[lm_idx], rotations_cw[kf_idx],
+                        translations_cw[kf_idx], camera, proj, p_c)) {
+        continue;
+      }
+
+      const Eigen::Vector2d e = obs.pixel - proj;
+
+      const double x = p_c.x();
+      const double y = p_c.y();
+      const double z = p_c.z();
+      const double z2 = z * z;
+
+      Eigen::Matrix<double, 2, 3> J_proj;
+      J_proj << camera.fx / z, 0.0, -camera.fx * x / z2, 0.0, camera.fy / z,
+          -camera.fy * y / z2;
+
+      const double w =
+          huberWeight(e.squaredNorm(), options_.local_ba_huber_delta);
+
+      Eigen::Matrix<double, 2, 6> J_pose = Eigen::Matrix<double, 2, 6>::Zero();
+      if (kf_idx > 0) {
+        Eigen::Matrix<double, 3, 6> J_pc_xi;
+        J_pc_xi.block<3, 3>(0, 0) = -hat(p_c);
+        J_pc_xi.block<3, 3>(0, 3) = Eigen::Matrix3d::Identity();
+        J_pose = J_proj * J_pc_xi;
+      }
+
+      const Eigen::Matrix<double, 2, 3> J_point = J_proj * rotations_cw[kf_idx];
+
+      if (kf_idx > 0) {
+        const int pose_offset = 6 * (kf_idx - 1);
+        H.block<6, 6>(pose_offset, pose_offset) +=
+            w * J_pose.transpose() * J_pose;
+        b.segment<6>(pose_offset) += w * J_pose.transpose() * e;
+
+        const int point_offset = pose_dim + 3 * lm_idx;
+        H.block(pose_offset, point_offset, 6, 3) +=
+            w * J_pose.transpose() * J_point;
+        H.block(point_offset, pose_offset, 3, 6) +=
+            w * J_point.transpose() * J_pose;
+      }
+
+      {
+        const int point_offset = pose_dim + 3 * lm_idx;
+        H.block<3, 3>(point_offset, point_offset) +=
+            w * J_point.transpose() * J_point;
+        b.segment<3>(point_offset) += w * J_point.transpose() * e;
+      }
+
+      cost += w * e.squaredNorm();
+      valid_obs++;
+    }
+
+    if (valid_obs < options_.min_ba_observations) {
+      return result;
+    }
+
+    const Eigen::VectorXd dx = H.ldlt().solve(b);
+    if (!dx.allFinite()) {
+      return result;
+    }
+
+    if (dx.norm() < options_.local_ba_epsilon) {
+      break;
+    }
+
+    // update poses (except first)
+    for (int kf_idx = 1; kf_idx < num_keyframes; ++kf_idx) {
+      const int pose_offset = 6 * (kf_idx - 1);
+      const Eigen::Vector3d dtheta = dx.segment<3>(pose_offset);
+      const Eigen::Vector3d dt = dx.segment<3>(pose_offset + 3);
+
+      rotations_cw[kf_idx] = expSO3(dtheta) * rotations_cw[kf_idx];
+      translations_cw[kf_idx] += dt;
+    }
+
+    // update points
+    for (int lm_idx = 0; lm_idx < num_landmarks; ++lm_idx) {
+      const int point_offset = pose_dim + 3 * lm_idx;
+      points_w[lm_idx] += dx.segment<3>(point_offset);
+    }
+
+    if (std::abs(last_cost - cost) < options_.local_ba_epsilon) {
+      break;
+    }
+    last_cost = cost;
+  }
+
+  result.rmse_after = computeLocalBaRmse(rotations_cw, translations_cw,
+                                         points_w, observations, camera);
+
+  // -------------------------------------------------------------------------
+  // Write back optimized poses and landmarks
+  // -------------------------------------------------------------------------
+  for (int k = 0; k < num_keyframes; ++k) {
+    const Eigen::Matrix3d R_wc = rotations_cw[k].transpose();
+    const Eigen::Vector3d t_wc = -R_wc * translations_cw[k];
+
+    ba_keyframes[k]->pose_wc.setIdentity();
+    ba_keyframes[k]->pose_wc.block<3, 3>(0, 0) = R_wc;
+    ba_keyframes[k]->pose_wc.block<3, 1>(0, 3) = t_wc;
+  }
+
+  for (int j = 0; j < num_landmarks; ++j) {
+    landmarks[local_to_global_landmark[j]].p_w = points_w[j];
+  }
+
+  result.success = true;
+  result.num_keyframes = num_keyframes;
+  result.num_landmarks = num_landmarks;
+  result.num_observations = static_cast<int>(observations.size());
   return result;
 }
 

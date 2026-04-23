@@ -22,15 +22,20 @@ public:
   void addKeyframe(const Frame &frame);
 
   void setActiveLandmarks(const std::vector<MapPoint> &landmarks);
-  void addLandmarks(const std::vector<MapPoint>& landmarks);
+  void addLandmarks(const std::vector<MapPoint> &landmarks);
 
-  void markTrackedLandmarks(const std::vector<MapPoint>& tracked_landmarks);
-  void markMissedLandmarks(const std::vector<int>& tracked_landmark_ids);
+  void assignNewLandmarkIds(std::vector<MapPoint> &landmarks);
+
+  void markTrackedLandmarks(const std::vector<MapPoint> &tracked_landmarks);
+  void markMissedLandmarks(const std::vector<int> &tracked_landmark_ids);
 
   void pruneLandmarks();
 
   const std::vector<Frame> &activeKeyframes() const;
+  std::vector<Frame> &mutableActiveKeyframes();
+
   const std::vector<MapPoint> &activeLandmarks() const;
+  std::vector<MapPoint> &mutableActiveLandmarks();
 
   int numActiveKeyframes() const;
   int numActiveLandmarks() const;
@@ -42,6 +47,8 @@ private:
   Options options_;
   std::vector<Frame> active_keyframes_;
   std::vector<MapPoint> active_landmarks_;
+
+  int next_landmark_id = 0;
 };
 
 } // namespace svo
