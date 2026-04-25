@@ -281,7 +281,7 @@ PoseEstimateResult Estimator::refinePosePoseOnly(
       const double z2 = z * z;
 
       Eigen::Matrix<double, 2, 3> J_proj;
-      J_proj << camera.fy / z, 0.0, -camera.fx * x / z2, 0.0, camera.fy / z,
+      J_proj << camera.fx / z, 0.0, -camera.fx * x / z2, 0.0, camera.fy / z,
           -camera.fy * y / z2;
 
       Eigen::Matrix<double, 3, 6> J_pc_xi;
