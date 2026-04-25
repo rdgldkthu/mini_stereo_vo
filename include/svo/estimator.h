@@ -56,9 +56,12 @@ public:
     int local_ba_iterations = 5;
     double local_ba_epsilon = 1e-6;
     double local_ba_huber_delta = 5.0;
+    double local_ba_damping = 1e-3;
+
     int max_ba_keyframes = 5;
     int max_ba_landmarks = 200;
     int min_ba_observations = 30;
+    int min_ba_landmark_observations = 2;
   };
 
   explicit Estimator(const Options &options);

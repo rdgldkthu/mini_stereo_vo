@@ -2,6 +2,8 @@
 
 #include <cmath>
 #include <limits>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <Eigen/Dense>
@@ -377,6 +379,36 @@ Estimator::runLocalBundleAdjustment(std::vector<Frame> &keyframes,
   }
 
   // -------------------------------------------------------------------------
+  // Count observations per landmark inside selected keyframes
+  // -------------------------------------------------------------------------
+  std::unordered_map<int, int> landmark_obs_count;
+
+  for (int kf_idx = 0; kf_idx < static_cast<int>(ba_keyframes.size());
+       ++kf_idx) {
+    const Frame &frame = *ba_keyframes[kf_idx];
+
+    const int n = std::min(static_cast<int>(frame.tracked_points.size()),
+                           static_cast<int>(frame.tracked_landmark_ids.size()));
+
+    std::unordered_set<int> seen_in_this_frame;
+
+    for (int i = 0; i < n; ++i) {
+      const int landmark_id = frame.tracked_landmark_ids[i];
+
+      if (landmark_id_to_global_index.find(landmark_id) ==
+          landmark_id_to_global_index.end()) {
+        continue;
+      }
+
+      seen_in_this_frame.insert(landmark_id);
+    }
+
+    for (const int id : seen_in_this_frame) {
+      landmark_obs_count[id]++;
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // Gather observations from keyframes
   // -------------------------------------------------------------------------
   std::unordered_map<int, int> global_landmark_to_local;
@@ -386,25 +418,38 @@ Estimator::runLocalBundleAdjustment(std::vector<Frame> &keyframes,
   for (int kf_idx = 0; kf_idx < static_cast<int>(ba_keyframes.size());
        ++kf_idx) {
     const Frame &frame = *ba_keyframes[kf_idx];
+
     const int n = std::min(static_cast<int>(frame.tracked_points.size()),
                            static_cast<int>(frame.tracked_landmark_ids.size()));
 
     for (int i = 0; i < n; ++i) {
       const int landmark_id = frame.tracked_landmark_ids[i];
-      const auto it = landmark_id_to_global_index.find(landmark_id);
-      if (it == landmark_id_to_global_index.end()) {
+
+      const auto obs_count_it = landmark_obs_count.find(landmark_id);
+      if (obs_count_it == landmark_obs_count.end()) {
         continue;
       }
 
-      const int global_idx = it->second;
+      if (obs_count_it->second < options_.min_ba_landmark_observations) {
+        continue;
+      }
+
+      const auto global_it = landmark_id_to_global_index.find(landmark_id);
+      if (global_it == landmark_id_to_global_index.end()) {
+        continue;
+      }
+
+      const int global_idx = global_it->second;
 
       auto local_it = global_landmark_to_local.find(global_idx);
+
       int local_idx = -1;
       if (local_it == global_landmark_to_local.end()) {
         if (static_cast<int>(local_to_global_landmark.size()) >=
             options_.max_ba_landmarks) {
           continue;
         }
+
         local_idx = static_cast<int>(local_to_global_landmark.size());
         global_landmark_to_local[global_idx] = local_idx;
         local_to_global_landmark.push_back(global_idx);
@@ -538,7 +583,11 @@ Estimator::runLocalBundleAdjustment(std::vector<Frame> &keyframes,
       return result;
     }
 
+    H += options_.local_ba_damping *
+         Eigen::MatrixXd::Identity(total_dim, total_dim);
+
     const Eigen::VectorXd dx = H.ldlt().solve(b);
+
     if (!dx.allFinite()) {
       return result;
     }
