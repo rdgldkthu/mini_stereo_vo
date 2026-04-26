@@ -36,6 +36,33 @@ Eigen::Matrix3d expSO3(const Eigen::Vector3d &w) {
          (1.0 - std::cos(theta)) * A * A;
 }
 
+Eigen::Matrix3d leftJacobianSO3(const Eigen::Vector3d &w) {
+  const double theta = w.norm();
+  const Eigen::Matrix3d W = hat(w);
+
+  if (theta < 1e-10) {
+    return Eigen::Matrix3d::Identity() + 0.5 * W + (1.0 / 6.0) * W * W;
+  }
+
+  const double theta2 = theta * theta;
+  const double theta3 = theta2 * theta;
+
+  return Eigen::Matrix3d::Identity() + ((1.0 - std::cos(theta)) / theta2) * W +
+         ((theta - std::sin(theta)) / theta3) * W * W;
+}
+
+void applyLeftSE3Increment(const Eigen::Matrix<double, 6, 1> &dx,
+                           Eigen::Matrix3d &R_cw, Eigen::Vector3d &t_cw) {
+  const Eigen::Vector3d dtheta = dx.head<3>();
+  const Eigen::Vector3d drho = dx.tail<3>();
+
+  const Eigen::Matrix3d dR = expSO3(dtheta);
+  const Eigen::Vector3d dt = leftJacobianSO3(dtheta) * drho;
+
+  t_cw = dR * t_cw + dt;
+  R_cw = dR * R_cw;
+}
+
 double huberWeight(double squared_error, double delta) {
   const double error = std::sqrt(std::max(0.0, squared_error));
   if (error <= delta) {
@@ -313,11 +340,7 @@ PoseEstimateResult Estimator::refinePosePoseOnly(
       break;
     }
 
-    const Eigen::Vector3d dtheta = dx.head<3>();
-    const Eigen::Vector3d dt = dx.tail<3>();
-
-    R_cw = expSO3(dtheta) * R_cw;
-    t_cw = t_cw + dt;
+    applyLeftSE3Increment(dx, R_cw, t_cw);
 
     if (std::abs(last_cost - cost) < options_.pose_refine_epsilon) {
       break;
@@ -599,11 +622,11 @@ Estimator::runLocalBundleAdjustment(std::vector<Frame> &keyframes,
     // update poses (except first)
     for (int kf_idx = 1; kf_idx < num_keyframes; ++kf_idx) {
       const int pose_offset = 6 * (kf_idx - 1);
-      const Eigen::Vector3d dtheta = dx.segment<3>(pose_offset);
-      const Eigen::Vector3d dt = dx.segment<3>(pose_offset + 3);
+      Eigen::Matrix<double, 6, 1> pose_dx;
+      pose_dx.segment<6>(0) = dx.segment<6>(pose_offset);
 
-      rotations_cw[kf_idx] = expSO3(dtheta) * rotations_cw[kf_idx];
-      translations_cw[kf_idx] += dt;
+      applyLeftSE3Increment(pose_dx, rotations_cw[kf_idx],
+                            translations_cw[kf_idx]);
     }
 
     // update points
