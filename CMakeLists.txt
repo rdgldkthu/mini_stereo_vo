@@ -22,6 +22,7 @@ add_library(svo_core
   src/pose_writer.cpp
   src/stereo_initializer.cpp
   src/tracker.cpp
+  src/viewer.cpp
 )
 
 target_include_directories(svo_core
