@@ -19,6 +19,7 @@ add_library(svo_core
   src/estimator.cpp
   src/frontend.cpp
   src/map.cpp
+  src/pose_writer.cpp
   src/stereo_initializer.cpp
   src/tracker.cpp
 )
