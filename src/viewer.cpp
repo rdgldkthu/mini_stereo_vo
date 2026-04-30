@@ -48,7 +48,9 @@ cv::Mat Viewer::drawImageView(const cv::Mat &left_img,
   return vis;
 }
 
-cv::Mat Viewer::drawTrajectoryView(const std::vector<Eigen::Matrix4d> &poses) const {
+cv::Mat Viewer::drawTrajectoryView(const std::vector<Eigen::Matrix4d> &poses,
+                                   const std::vector<Eigen::Matrix4d> &gt_poses,
+                                   const ViewerStatus &status) const {
   const int size = options_.trajectory_size;
   cv::Mat traj(size, size, CV_8UC3, cv::Scalar(20, 20, 20));
 
@@ -59,34 +61,72 @@ cv::Mat Viewer::drawTrajectoryView(const std::vector<Eigen::Matrix4d> &poses) co
     return traj;
   }
 
-  const Eigen::Vector3d t_curr = poses.back().block<3, 1>(0, 3);
+  const int frame_id = status.frame_id;
 
-  for (size_t i = 1; i < poses.size(); ++i) {
-    const Eigen::Vector3d t0 = poses[i - 1].block<3, 1>(0, 3) - t_curr;
-    const Eigen::Vector3d t1 = poses[i].block<3, 1>(0, 3) - t_curr;
+  Eigen::Vector3d center = Eigen::Vector3d::Zero();
+  if (options_.center_on_current_pose) {
+    center = poses.back().block<3, 1>(0, 3);
+  }
 
-    const int x0 =
-        static_cast<int>(center_x + options_.trajectory_scale * t0.x());
-    const int y0 =
-        static_cast<int>(center_y - options_.trajectory_scale * t0.z());
+  auto project = [&](const Eigen::Vector3d &t) {
+    const Eigen::Vector3d rel = t - center;
+    const int x =
+        static_cast<int>(center_x + options_.trajectory_scale * rel.x());
+    const int y =
+        static_cast<int>(center_y - options_.trajectory_scale * rel.z());
+    return cv::Point(x, y);
+  };
 
-    const int x1 =
-        static_cast<int>(center_x + options_.trajectory_scale * t1.x());
-    const int y1 =
-        static_cast<int>(center_y - options_.trajectory_scale * t1.z());
+  if (!gt_poses.empty()) {
+    const int gt_end =
+        std::min(frame_id, static_cast<int>(gt_poses.size()) - 1);
 
-    if (x0 >= 0 && x0 < size && y0 >= 0 && y0 < size && x1 >= 0 && x1 < size &&
-        y1 >= 0 && y1 < size) {
-      cv::line(traj, cv::Point(x0, y0), cv::Point(x1, y1),
-               cv::Scalar(255, 255, 255), 1);
+    for (int i = 1; i < gt_end; ++i) {
+      const Eigen::Vector3d t0 = gt_poses[i - 1].block<3, 1>(0, 3);
+      const Eigen::Vector3d t1 = gt_poses[i].block<3, 1>(0, 3);
+
+      const cv::Point p0 = project(t0);
+      const cv::Point p1 = project(t1);
+
+      if (p0.x >= 0 && p0.x < size && p0.y >= 0 && p0.y < size && p1.x >= 0 &&
+          p1.x < size && p1.x >= 0 && p1.y < size) {
+        cv::line(traj, p0, p1, cv::Scalar(0, 180, 0), 2);
+      }
+    }
+
+    if (gt_end >= 0) {
+      const Eigen::Vector3d t_gt = gt_poses[gt_end].block<3, 1>(0, 3);
+      const cv::Point p_gt = project(t_gt);
+      if (p_gt.x >= 0 && p_gt.y < size && p_gt.y >= 0 && p_gt.y < size) {
+        cv::circle(traj, p_gt, 4, cv::Scalar(255, 0, 0), -1);
+      }
     }
   }
 
-  // current position stays at center
-  cv::circle(traj, cv::Point(center_x, center_y), 3, cv::Scalar(0, 0, 255), -1);
+  for (size_t i = 1; i < poses.size(); ++i) {
+    const Eigen::Vector3d t0 = poses[i - 1].block<3, 1>(0, 3);
+    const Eigen::Vector3d t1 = poses[i].block<3, 1>(0, 3);
 
-  cv::putText(traj, "Trajectory (x-z)", cv::Point(20, 30),
-              cv::FONT_HERSHEY_SIMPLEX, 0.65, cv::Scalar(255, 255, 255), 2);
+    const cv::Point p0 = project(t0);
+    const cv::Point p1 = project(t1);
+
+    if (p0.x >= 0 && p0.x < size && p0.y >= 0 && p0.y < size && p1.x >= 0 &&
+        p1.x < size && p1.x >= 0 && p1.y < size) {
+      cv::line(traj, p0, p1, cv::Scalar(0, 255, 255), 2);
+    }
+  }
+
+  const Eigen::Vector3d t_est = poses.back().block<3, 1>(0, 3);
+  const cv::Point p_est = project(t_est);
+  if (p_est.x >= 0 && p_est.x < size && p_est.y >= 0 && p_est.y < size) {
+    cv::circle(traj, p_est, 5, cv::Scalar(0, 0, 255), -1);
+  }
+
+  cv::putText(traj, "Trajectory x-z: est=yellow, gt=green", cv::Point(20, 30),
+              cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 255, 255), 2);
+
+  cv::putText(traj, "press q or ESC to quit", cv::Point(20, size - 25),
+              cv::FONT_HERSHEY_SIMPLEX, 0.55, cv::Scalar(180, 180, 180), 1);
 
   return traj;
 }
@@ -94,19 +134,16 @@ cv::Mat Viewer::drawTrajectoryView(const std::vector<Eigen::Matrix4d> &poses) co
 bool Viewer::update(const cv::Mat &left_img,
                     const std::vector<cv::Point2f> &active_points,
                     const std::vector<Eigen::Matrix4d> &poses,
+                    const std::vector<Eigen::Matrix4d> &gt_poses,
                     const ViewerStatus &status) {
   const cv::Mat image_view = drawImageView(left_img, active_points, status);
-  const cv::Mat traj_view = drawTrajectoryView(poses);
+  const cv::Mat traj_view = drawTrajectoryView(poses, gt_poses, status);
 
   cv::imshow("stereo_vo: tracking", image_view);
   cv::imshow("stereo_vo: trajectory", traj_view);
 
   const int key = cv::waitKey(options_.image_wait_ms);
-  if (key == 'q' || key == 27) {
-    return false;
-  }
-
-  return true;
+  return !(key == 'q' || key == 27);
 }
 
 } // namespace svo

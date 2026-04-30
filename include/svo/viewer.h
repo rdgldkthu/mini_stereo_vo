@@ -30,6 +30,7 @@ public:
     int image_wait_ms = 1;
     int trajectory_size = 600;
     double trajectory_scale = 8.0;
+    bool center_on_current_pose = true;
   };
 
   explicit Viewer(const Options &options);
@@ -37,6 +38,7 @@ public:
   bool update(const cv::Mat &left_img,
               const std::vector<cv::Point2f> &active_points,
               const std::vector<Eigen::Matrix4d> &poses,
+              const std::vector<Eigen::Matrix4d> &gt_poses,
               const ViewerStatus &status);
 
 private:
@@ -44,7 +46,9 @@ private:
                         const std::vector<cv::Point2f> &active_points,
                         const ViewerStatus &status) const;
 
-  cv::Mat drawTrajectoryView(const std::vector<Eigen::Matrix4d> &poses) const;
+  cv::Mat drawTrajectoryView(const std::vector<Eigen::Matrix4d> &poses,
+                             const std::vector<Eigen::Matrix4d> &gt_poses,
+                             const ViewerStatus &status) const;
 
 private:
   Options options_;
