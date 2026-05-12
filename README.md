@@ -1,210 +1,101 @@
 # mini_stereo_vo
 
-A from-scratch stereo visual odometry (VO) system in C++ using the KITTI odometry dataset.
+![Trajectory](assets/trajectory.png)
 
-## Overview
+Stereo visual odometry built from scratch in C++. Tracks a moving camera through the KITTI benchmark — no SLAM library, no shortcuts.
 
-This project implements a minimal yet complete stereo visual odometry pipeline with:
-
-- stereo initialization from rectified image pairs
-- feature tracking using optical flow
-- pose estimation with PnP + RANSAC
-- sequential VO with failure handling
-- stereo reinitialization for long-term robustness
-- trajectory evaluation using evo
-
-The focus is on **clarity, correctness, and understanding**, rather than full SLAM completeness.
-
----
-
-## Current Results
-
-The system successfully runs through full KITTI sequences using:
-
-- frame-to-frame tracking
-- pose estimation with quality gating
-- automatic stereo reinitialization when tracking degrades
-
-### Trajectory Visualization
-
-![Trajectory](assets/traj_05_260415.png)
-
-- Ground truth: smooth path
-- Estimated VO: follows overall structure but accumulates drift over time
+`C++ 17` · `Eigen3` · `OpenCV` · `CMake / Ninja` · `KITTI` · `evo`
 
 ---
 
 ## Pipeline
 
-### 1. Stereo Initialization
+```
+  Stereo image pair
+         │
+         ▼
+  [Stereo Init]   ── ORB detect + match, row/disparity filter, triangulate ──▶  3D landmarks
+         │
+         ▼
+   [Tracker]      ── pyramidal LK optical flow + forward-backward check ──────▶  2D tracks
+         │
+         ▼
+  [Estimator]     ── PnP RANSAC → Gauss-Newton refinement (Huber loss) ───────▶  pose T_wc
+         │
+         ▼
+  [Frontend]      ── quality gate, keyframe decision, stereo re-triangulation ▶  keyframe
+         │
+         ▼
+    [Map]          ── sliding window: 5 keyframes · 2 000 landmarks ──────────▶  pruned map
+         │
+         ▼
+  [Local BA]      ── joint pose + landmark optimization every 2 keyframes ────▶  refined poses
+```
 
-- ORB feature detection and matching between left/right images
-- row and disparity filtering
-- triangulation of 3D landmarks
-- landmarks initialized in camera frame
+Each stage is a self-contained module (`include/svo/`, `src/`). The main loop in `app/run_kitti.cpp` orchestrates them — no hidden global state.
 
-### 2. Tracking
+**Pose refinement** — after PnP RANSAC, a custom Gauss-Newton optimizer re-solves pose on inliers only, using Huber loss to suppress residual outliers. The refined pose replaces the RANSAC result only if reprojection RMSE improves.
 
-- features tracked across frames using pyramidal LK optical flow
-- forward-backward consistency check
-- invalid tracks filtered out
-
-### 3. Pose Estimation
-
-- 3D–2D correspondences constructed from tracked landmarks
-- pose estimated using `solvePnPRansac`
-- previous pose used as initial guess
-
-### 4. Pose Validation
-
-Pose is accepted only if:
-
-- sufficient inliers
-- sufficient inlier ratio
-- reasonable frame-to-frame motion
-
-Otherwise:
-
-- previous pose is reused
-- system enters degraded state
-
-### 5. Reinitialization
-
-Triggered when:
-
-- tracking quality drops
-- pose estimation fails or is rejected
-
-Behavior:
-
-- stereo reinitialization on current frame
-- new landmarks triangulated
-- transformed into world frame using last valid pose
+**Failure recovery** — the frontend gates each pose on inlier count, inlier ratio, and motion magnitude. Consecutive rejections trigger stereo reinitialization: new landmarks are triangulated from the current frame and transformed into the world frame using the last valid pose, so the system recovers without losing global position.
 
 ---
 
-## Limitations
+## Results
 
-This is a **pure VO system**, not full SLAM.
+| Tracking overlay | Inlier ratio over time |
+|:---:|:---:|
+| ![Tracking](assets/tracking.png) | ![Inlier ratio](assets/inlier_ratio.png) |
 
-Missing components:
-
-- global map optimization (Bundle Adjustment)
-- loop closure
-- keyframe-based map refinement
-- landmark lifecycle management
-
-### Resulting Behavior
-
-- drift accumulates over time
-- trajectory remains locally consistent
-- global consistency is not enforced
-
-This is expected and correct for the current system design.
+Runs through all 1 117 frames of KITTI seq 05. Inlier ratio stays above 0.9 for the majority of the sequence. Trajectory follows ground truth with expected long-range drift — pure VO without loop closure or global optimization.
 
 ---
 
-## Repository Structure
+## Quick Start
 
-```text
+**Dependencies** — Eigen3, OpenCV (core, imgcodecs, imgproc, highgui, features2d, video, calib3d). Install everything including `evo` with:
+
+```bash
+bash scripts/bootstrap_ubuntu2404.sh
+```
+
+**Build and run:**
+
+```bash
+# build
+cmake -S . -B build -G Ninja && cmake --build build -j
+
+# run (KITTI seq 05)
+./build/run_kitti data/kitti 05 results/traj/05_vo.txt
+
+# evaluate APE / RPE — outputs plots to results/tables/05/
+scripts/eval_kitti.sh 05 results/traj/05_vo.txt
+
+# regenerate README images
+source .venv/bin/activate && python3 scripts/generate_vis.py --seq 05 --traj results/traj/05_vo.txt
+```
+
+---
+
+## Repo Layout
+
+```
 mini_stereo_vo/
-├── include/svo/
-│   ├── camera.h
-│   ├── dataset_kitti.h
-│   ├── estimator.h
-│   ├── feature.h
-│   ├── frame.h
-│   ├── map_point.h
-│   ├── stereo_initializer.h
-│   └── tracker.h
-├── src/
-│   ├── camera.cpp
-│   ├── dataset_kitti.cpp
-│   ├── estimator.cpp
+├── app/run_kitti.cpp          # entry point and pipeline orchestration
+├── include/svo/               # module headers
+├── src/                       # implementations
 │   ├── stereo_initializer.cpp
 │   ├── tracker.cpp
-├── app/
-│   └── run_kitti.cpp
+│   ├── estimator.cpp
+│   ├── frontend.cpp
+│   ├── map.cpp
+│   └── viewer.cpp
 ├── scripts/
-│   ├── bootstrap_ubuntu2404.sh
-│   └── eval_kitti.sh
-├── results/
-│   ├── debug/
-│   ├── tables/
-│   ├── traj/
-│   └── videos/
+│   ├── generate_vis.py        # generate README assets
+│   ├── eval_kitti.sh          # APE / RPE evaluation via evo
+│   └── bootstrap_ubuntu2404.sh
+├── assets/                    # images used in this README
+└── results/
+    ├── traj/                  # output trajectory files
+    ├── debug/                 # per-frame tracking PNGs + stats CSV
+    └── tables/                # evo evaluation plots
 ```
-
----
-
-## Build
-
-```bash
-cmake -S . -B build -G Ninja
-cmake --build build -j
-```
-
----
-
-## Run
-
-```bash
-./build/run_kitti data/kitti 05 results/traj/05_vo.txt
-```
-
----
-
-## Evaluation
-
-```bash
-scripts/eval_kitti.sh 05 results/traj/05_vo.txt
-```
-
-Produces:
-
-- trajectory plots
-- APE (absolute pose error)
-- RPE (relative pose error)
-
----
-
-## Key Observations
-
-- VO works reliably across full sequences
-- reinitialization prevents early failure
-- pose gating avoids catastrophic jumps
-- drift accumulates without global optimization
-
----
-
-## Future Work
-
-### Short-term improvements
-
-- better pose validation (reprojection error)
-- adaptive reinitialization thresholds
-- landmark quality filtering
-
-### Medium-term improvements
-
-- keyframe insertion
-- local bundle adjustment
-- landmark re-triangulation
-
-### Long-term extensions
-
-- loop closure
-- pose graph optimization
-- full SLAM system
-
----
-
-## Notes
-
-This project is intentionally designed to:
-
-- prioritize understanding over complexity
-- build the VO pipeline step by step
-- expose real-world failure modes (drift, tracking loss, reinitialization)
-
-It is meant as a **learning-focused implementation of visual odometry**, not a production SLAM system.
