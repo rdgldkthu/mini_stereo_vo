@@ -29,15 +29,29 @@ echo "Evaluating sequence $SEQ"
 echo "GT : $GT"
 echo "EST: $EST"
 
-evo_traj kitti "$EST" --ref="$GT" -p --plot_mode=xz \
-  --save_plot "${OUT_DIR}/${EST_BASE}_traj_xz.pdf"
+# Truncate GT to match estimated trajectory length (old commits may produce fewer frames)
+GT_EVAL="$GT"
+GT_TMP=""
+EST_LINES=$(wc -l < "$EST")
+GT_LINES=$(wc -l < "$GT")
+if [ "$EST_LINES" -ne "$GT_LINES" ]; then
+  echo "Note: EST has ${EST_LINES} poses, GT has ${GT_LINES} — truncating GT to ${EST_LINES}"
+  GT_TMP=$(mktemp)
+  head -n "$EST_LINES" "$GT" > "$GT_TMP"
+  GT_EVAL="$GT_TMP"
+fi
+trap '[ -n "$GT_TMP" ] && rm -f "$GT_TMP"' EXIT
 
-evo_ape kitti "$GT" "$EST" -va --plot --plot_mode=xz \
-  --save_plot "${OUT_DIR}/${EST_BASE}_ape_xz.pdf" \
+# evo appends figure names to PNG paths (e.g. _trajectories, _xz) — keep base simple
+evo_traj kitti "$EST" --ref="$GT_EVAL" -p --plot_mode=xz \
+  --save_plot "${OUT_DIR}/${EST_BASE}_traj.png"
+
+evo_ape kitti "$GT_EVAL" "$EST" -va --plot --plot_mode=xz \
+  --save_plot "${OUT_DIR}/${EST_BASE}_ape.png" \
   --save_results "${OUT_DIR}/${EST_BASE}_ape.zip"
 
-evo_rpe kitti "$GT" "$EST" -va --plot --plot_mode=xz \
-  --save_plot "${OUT_DIR}/${EST_BASE}_rpe_xz.pdf" \
+evo_rpe kitti "$GT_EVAL" "$EST" -va --plot --plot_mode=xz \
+  --save_plot "${OUT_DIR}/${EST_BASE}_rpe.png" \
   --save_results "${OUT_DIR}/${EST_BASE}_rpe.zip"
 
 echo "Saved results to $OUT_DIR"
