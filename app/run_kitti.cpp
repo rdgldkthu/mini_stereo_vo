@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cmath>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -154,19 +155,35 @@ std::vector<Eigen::Matrix4d> loadKittiPoses(const fs::path &pose_path) {
 } // namespace
 
 int main(int argc, char **argv) {
-  if (argc < 3 || argc > 4) {
+  if (argc < 3) {
     std::cerr << "Usage: " << argv[0]
-              << " <kitti_root> <sequence> [output_pose_file]\n";
-    std::cerr << "Example: " << argv[0]
-              << " data/kitti 05 results/traj/05_vo.txt\n";
+              << " <kitti_root> <sequence> [pose_keyword] [--save-debug]\n";
+    std::cerr << "Example: " << argv[0] << " data/kitti 05 vo\n";
     return 1;
   }
 
   const fs::path kitti_root = argv[1];
   const std::string sequence = argv[2];
-  const fs::path output_pose =
-      (argc == 4) ? fs::path(argv[3])
-                  : fs::path("results/traj") / (sequence + "_vo.txt");
+
+  bool save_debug = false;
+  std::string pose_keyword;
+  for (int i = 3; i < argc; ++i) {
+    if (std::string(argv[i]) == "--save-debug") {
+      save_debug = true;
+    } else {
+      pose_keyword = argv[i];
+    }
+  }
+
+  std::time_t now = std::time(nullptr);
+  char date_buf[7];
+  std::strftime(date_buf, sizeof(date_buf), "%y%m%d", std::localtime(&now));
+  const std::string date_str(date_buf);
+
+  const std::string file_name_stem = pose_keyword.empty()
+      ? sequence + "_" + date_str
+      : sequence + "_" + date_str + "_" + pose_keyword;
+  const fs::path output_pose = fs::path("results/traj") / (file_name_stem + ".txt");
 
   fs::create_directories("results/debug");
   fs::create_directories("results/traj");
@@ -282,8 +299,8 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  if (!init_result.match_vis.empty()) {
-    cv::imwrite("results/debug/" + sequence + "_init_matches.png",
+  if (save_debug && !init_result.match_vis.empty()) {
+    cv::imwrite("results/debug/" + file_name_stem + "_init_matches.png",
                 init_result.match_vis);
   }
 
@@ -307,7 +324,7 @@ int main(int argc, char **argv) {
   // -------------------------------------------------------------------------
   // Logging
   // -------------------------------------------------------------------------
-  std::ofstream stats("results/debug/" + sequence + "_vo_stats.csv");
+  std::ofstream stats("results/debug/" + file_name_stem + "_stats.csv");
   stats << "frame_id,num_active_points,num_correspondences,num_inliers,"
            "inlier_ratio,pose_success,pose_accepted,reinitialized,is_keyframe,"
            "num_keyframes,num_map_landmarks,local_ba,local_ba_accepted,"
@@ -532,14 +549,15 @@ int main(int argc, char **argv) {
           << frame_stats.delta_t << "," << frame_stats.rmse_before << ","
           << frame_stats.rmse_after << "\n";
 
-    const bool save_sparse_debug = (frame_id % 10 == 0);
-    const bool save_dense_debug = frontend.shouldSaveDenseDebug(frame_id, 5);
-
-    if (!track_result.track_vis.empty() &&
-        (save_sparse_debug || save_dense_debug)) {
-      const std::string image_path = "results/debug/" + sequence + "_track_" +
-                                     cv::format("%06d", frame_id) + ".png";
-      cv::imwrite(image_path, track_result.track_vis);
+    if (save_debug) {
+      const bool save_sparse_debug = (frame_id % 10 == 0);
+      const bool save_dense_debug = frontend.shouldSaveDenseDebug(frame_id, 5);
+      if (!track_result.track_vis.empty() &&
+          (save_sparse_debug || save_dense_debug)) {
+        const std::string image_path = "results/debug/" + file_name_stem + "_track_" +
+                                       cv::format("%06d", frame_id) + ".png";
+        cv::imwrite(image_path, track_result.track_vis);
+      }
     }
 
     std::cout << "frame " << frame_id
