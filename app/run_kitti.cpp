@@ -2,11 +2,9 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
-#include <iomanip>
 #include <iostream>
-#include <stdexcept>
+#include <sstream>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include <Eigen/Core>
@@ -20,8 +18,10 @@
 #include "svo/frontend.h"
 #include "svo/map.h"
 #include "svo/map_point.h"
+#include "svo/pose_writer.h"
 #include "svo/stereo_initializer.h"
 #include "svo/tracker.h"
+#include "svo/viewer.h"
 
 namespace fs = std::filesystem;
 
@@ -100,31 +100,6 @@ transformLandmarksToWorld(const std::vector<svo::MapPoint> &local_landmarks,
   return world_landmarks;
 }
 
-void writeKittiTrajectory(const fs::path &out_path,
-                          const std::vector<Eigen::Matrix4d> &poses) {
-  fs::create_directories(out_path.parent_path());
-
-  std::ofstream ofs(out_path);
-  if (!ofs) {
-    throw std::runtime_error("Failed to open output file: " +
-                             out_path.string());
-  }
-
-  ofs << std::fixed << std::setprecision(9);
-
-  for (const auto &T : poses) {
-    for (int r = 0; r < 3; ++r) {
-      for (int c = 0; c < 4; ++c) {
-        ofs << T(r, c);
-        if (!(r == 2 && c == 3)) {
-          ofs << " ";
-        }
-      }
-    }
-    ofs << "\n";
-  }
-}
-
 void gatherPnPInliers(const std::vector<Eigen::Vector3d> &object_points,
                       const std::vector<cv::Point2f> &image_points,
                       const cv::Mat &inlier_indices,
@@ -143,33 +118,37 @@ void gatherPnPInliers(const std::vector<Eigen::Vector3d> &object_points,
   }
 }
 
-bool isInDebugWindow(int frame_id, int center, int radius) {
-  return std::abs(frame_id - center) <= radius;
-}
 
-std::vector<svo::MapPoint> refreshTrackedLandmarksFromMap(
-    const std::vector<svo::MapPoint> &tracked_landmarks,
-    const std::vector<svo::MapPoint> &map_landmarks) {
-  std::unordered_map<int, svo::MapPoint> id_to_landmark;
-  id_to_landmark.reserve(map_landmarks.size());
+std::vector<Eigen::Matrix4d> loadKittiPoses(const fs::path &pose_path) {
+  std::vector<Eigen::Matrix4d> poses;
 
-  for (const auto &landmark : map_landmarks) {
-    id_to_landmark[landmark.id] = landmark;
+  std::ifstream ifs(pose_path);
+  if (!ifs) {
+    std::cerr << "GT pose file not found: " << pose_path << "\n";
+    return poses;
   }
 
-  std::vector<svo::MapPoint> refreshed;
-  refreshed.reserve(tracked_landmarks.size());
+  std::string line;
+  while (std::getline(ifs, line)) {
+    std::stringstream ss(line);
 
-  for (const auto &landmark : tracked_landmarks) {
-    const auto it = id_to_landmark.find(landmark.id);
-    if (it != id_to_landmark.end()) {
-      refreshed.push_back(it->second);
-    } else {
-      refreshed.push_back(landmark);
+    Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
+
+    for (int r = 0; r < 3; ++r) {
+      for (int c = 0; c < 4; ++c) {
+        ss >> T(r, c);
+      }
+    }
+
+    if (ss) {
+      poses.push_back(T);
     }
   }
 
-  return refreshed;
+  std::cout << "Loaded " << poses.size() << " ground-truth poses from "
+            << pose_path << "\n";
+
+  return poses;
 }
 
 } // namespace
@@ -211,6 +190,9 @@ int main(int argc, char **argv) {
   std::cout << "Loaded calibration from: " << dataset.calibPath() << "\n";
   camera.print();
 
+  const fs::path gt_pose_path = kitti_root / "poses" / (sequence + ".txt");
+  const std::vector<Eigen::Matrix4d> gt_poses = loadKittiPoses(gt_pose_path);
+
   // -------------------------------------------------------------------------
   // Modules
   // -------------------------------------------------------------------------
@@ -243,13 +225,13 @@ int main(int argc, char **argv) {
   estimator_options.pose_refine_epsilon = 1e-6;
   estimator_options.pose_refine_huber_delta = 5.0;
   estimator_options.min_refine_inliers = 10;
-  estimator_options.local_ba_iterations = 5;
+  estimator_options.local_ba_iterations = 3;
   estimator_options.local_ba_epsilon = 1e-6;
   estimator_options.local_ba_huber_delta = 5.0;
   estimator_options.local_ba_damping = 1e-3;
-  estimator_options.max_ba_keyframes = 5;
-  estimator_options.max_ba_landmarks = 200;
-  estimator_options.min_ba_observations = 30;
+  estimator_options.max_ba_keyframes = 3;
+  estimator_options.max_ba_landmarks = 100;
+  estimator_options.min_ba_observations = 20;
   estimator_options.min_ba_landmark_observations = 2;
   svo::Estimator estimator(estimator_options);
 
@@ -259,6 +241,13 @@ int main(int argc, char **argv) {
   frontend_options.keyframe_min_tracked_points = 60;
   frontend_options.keyframe_min_frame_gap = 5;
   frontend_options.keyframe_low_track_translation_threshold_m = 0.5;
+  frontend_options.min_pose_inliers = 15;
+  frontend_options.min_pose_inlier_ratio = 0.10;
+  frontend_options.max_frame_translation_m = 2.0;
+  frontend_options.min_reinit_frame_gap = 10;
+  frontend_options.weak_track_threshold = 80;
+  frontend_options.emergency_rejected_poses_count = 2;
+  frontend_options.local_ba_keyframe_interval = 2;
   svo::Frontend frontend(frontend_options);
 
   svo::Map::Options map_options;
@@ -267,6 +256,12 @@ int main(int argc, char **argv) {
   map_options.min_observed_times = 2;
   map_options.max_missed_times = 8;
   svo::Map map(map_options);
+
+  svo::Viewer::Options viewer_options;
+  viewer_options.image_wait_ms = 1;
+  viewer_options.trajectory_size = 600;
+  viewer_options.trajectory_scale = 0.5;
+  svo::Viewer viewer(viewer_options);
 
   // -------------------------------------------------------------------------
   // Initial stereo bootstrapping
@@ -292,41 +287,22 @@ int main(int argc, char **argv) {
                 init_result.match_vis);
   }
 
-  std::vector<cv::Point2f> active_points_2d =
-      makeInitialActivePoints(init_result);
   std::vector<svo::MapPoint> active_landmarks =
       makeInitialActiveLandmarks(init_result);
   map.assignNewLandmarkIds(active_landmarks);
 
-  // frame 0 defines world frame
+  frontend.initialize(frame0, init_result, active_landmarks);
+
   frame0.pose_wc = Eigen::Matrix4d::Identity();
   frame0.is_keyframe = true;
-  frame0.tracked_points = active_points_2d;
+  frame0.tracked_points = frontend.activePoints();
   frame0.tracked_landmark_ids.clear();
-  frame0.tracked_landmark_ids.reserve(active_landmarks.size());
   for (const auto &landmark : active_landmarks) {
     frame0.tracked_landmark_ids.push_back(landmark.id);
   }
 
   map.addKeyframe(frame0);
   map.setActiveLandmarks(active_landmarks);
-
-  int last_keyframe_frame_id = 0;
-  Eigen::Matrix4d last_keyframe_pose_wc = frame0.pose_wc;
-
-  // -------------------------------------------------------------------------
-  // Runtime state
-  // -------------------------------------------------------------------------
-  std::vector<Eigen::Matrix4d> poses;
-  poses.reserve(dataset.numFrames());
-  poses.push_back(Eigen::Matrix4d::Identity());
-
-  svo::Frame prev_frame = frame0;
-  int last_init_frame_id = 0;
-  int consecutive_rejected_poses = 0;
-  int dense_debug_center = -1;
-  int inserted_keyframes_since_last_ba = 0;
-  const int local_ba_keyframe_interval = 2;
 
   // -------------------------------------------------------------------------
   // Logging
@@ -338,7 +314,7 @@ int main(int argc, char **argv) {
            "local_ba_rejected,ba_rmse_before,ba_rmse_after,"
            "tx,ty,tz,delta_t,rmse_before,rmse_after\n";
 
-  stats << "0," << active_points_2d.size() << ",0,0,0.0,1,1,0,1,"
+  stats << "0," << frontend.activePoints().size() << ",0,0,0.0,1,1,0,1,"
         << map.numActiveKeyframes() << "," << map.numActiveLandmarks() << ","
         << "0,0,0,0,0,0,0,0,0,0,0\n";
 
@@ -349,35 +325,21 @@ int main(int argc, char **argv) {
     svo::Frame curr_frame;
     if (!dataset.loadFrame(frame_id, curr_frame)) {
       std::cerr << "Failed to load frame " << frame_id << "\n";
-      poses.push_back(poses.back());
+      frontend.repeatLastPose();
 
-      const Eigen::Vector3d t_out = poses.back().block<3, 1>(0, 3);
+      const Eigen::Vector3d t_out = frontend.currentPose().block<3, 1>(0, 3);
       stats << frame_id << ",0,0,0,0.0,0,0,0,0," << map.numActiveKeyframes()
-            << "," << map.numActiveLandmarks() << "," << "0,0,0,0,0" << t_out(0) << ","
-            << t_out(1) << "," << t_out(2) << ",0,0,0\n";
+            << "," << map.numActiveLandmarks() << "," << "0,0,0,0,0" << t_out(0)
+            << "," << t_out(1) << "," << t_out(2) << ",0,0,0\n";
       continue;
     }
 
     const svo::TrackResult track_result = tracker.trackFrameToFrame(
-        prev_frame, curr_frame, active_points_2d, active_landmarks);
+        frontend.previousFrame(), curr_frame, frontend.activePoints(),
+        frontend.activeLandmarks());
 
-    bool pose_success = false;
-    bool pose_accepted = false;
-    bool reinitialized = false;
-    bool inserted_keyframe = false;
-    bool ran_local_ba = false;
-    bool local_ba_accepted = false;
-    bool local_ba_rejected = false;
-
-    int num_inliers = 0;
-    double inlier_ratio = 0.0;
-    double delta_t = 0.0;
-    double rmse_before = 0.0;
-    double rmse_after = 0.0;
-    double ba_rmse_before = 0.0;
-    double ba_rmse_after = 0.0;
-
-    Eigen::Matrix4d candidate_pose = poses.back();
+    svo::FrontendFrameStats frame_stats;
+    Eigen::Matrix4d candidate_pose = frontend.currentPose();
 
     // ---------------------------------------------------------------------
     // Raw PnP + pose-only refinement
@@ -386,7 +348,7 @@ int main(int argc, char **argv) {
         estimator_options.min_pnp_points) {
       Eigen::Matrix3d init_R_cw = Eigen::Matrix3d::Identity();
       Eigen::Vector3d init_t_cw = Eigen::Vector3d::Zero();
-      makePoseCwFromPoseWc(poses.back(), init_R_cw, init_t_cw);
+      makePoseCwFromPoseWc(frontend.currentPose(), init_R_cw, init_t_cw);
 
       const svo::PoseEstimateResult raw_pose_result =
           estimator.estimatePosePnPRansac(track_result.object_points,
@@ -394,10 +356,7 @@ int main(int argc, char **argv) {
                                           init_R_cw, init_t_cw, true);
 
       if (raw_pose_result.success) {
-        pose_success = true;
-        num_inliers = raw_pose_result.num_inliers;
-        inlier_ratio = static_cast<double>(num_inliers) /
-                       std::max(1, track_result.num_valid_correspondences);
+        frame_stats.pose_success = true;
 
         svo::PoseEstimateResult final_pose_result = raw_pose_result;
 
@@ -405,6 +364,7 @@ int main(int argc, char **argv) {
             estimator_options.min_refine_inliers) {
           std::vector<Eigen::Vector3d> inlier_object_points;
           std::vector<cv::Point2f> inlier_image_points;
+
           gatherPnPInliers(track_result.object_points,
                            track_result.image_points,
                            raw_pose_result.inlier_indices, inlier_object_points,
@@ -420,211 +380,160 @@ int main(int argc, char **argv) {
           }
         }
 
-        rmse_before = raw_pose_result.reprojection_rmse_before;
-        rmse_after = final_pose_result.reprojection_rmse_after;
+        frame_stats.rmse_before = raw_pose_result.reprojection_rmse_before;
+        frame_stats.rmse_after = final_pose_result.reprojection_rmse_after;
 
         candidate_pose = makePoseWcFromPnP(final_pose_result.rotation,
                                            final_pose_result.translation);
 
-        const Eigen::Vector3d t_prev = poses.back().block<3, 1>(0, 3);
-        const Eigen::Vector3d t_curr = candidate_pose.block<3, 1>(0, 3);
-        delta_t = (t_curr - t_prev).norm();
-
-        const bool enough_inliers = (raw_pose_result.num_inliers >= 15);
-        const bool enough_ratio = (inlier_ratio >= 0.10);
-        const bool reasonable_jump = (delta_t <= 2.0);
-
-        if (enough_inliers && enough_ratio && reasonable_jump) {
-          pose_accepted = true;
-          poses.push_back(candidate_pose);
-          consecutive_rejected_poses = 0;
-        } else {
-          poses.push_back(poses.back());
-          consecutive_rejected_poses++;
-          dense_debug_center = frame_id;
-        }
+        frontend.acceptPose(frame_id, raw_pose_result.num_inliers,
+                            track_result.num_valid_correspondences,
+                            candidate_pose, frame_stats);
       } else {
-        poses.push_back(poses.back());
-        consecutive_rejected_poses++;
-        dense_debug_center = frame_id;
+        frontend.rejectPose(frame_id, track_result.num_valid_correspondences,
+                            frame_stats);
       }
     } else {
-      poses.push_back(poses.back());
-      consecutive_rejected_poses++;
-      dense_debug_center = frame_id;
+      frontend.rejectPose(frame_id, track_result.num_valid_correspondences,
+                          frame_stats);
     }
 
     // ---------------------------------------------------------------------
     // Reinitialization policy
     // ---------------------------------------------------------------------
-    const bool weak_but_accepted =
-        pose_accepted && (frame_id - last_init_frame_id > 10) &&
-        (num_inliers < 12 || track_result.curr_points.size() < 80);
-
-    const bool emergency_reinit = !pose_accepted &&
-                                  (frame_id - last_init_frame_id > 10) &&
-                                  (consecutive_rejected_poses >= 2 ||
-                                   track_result.curr_points.size() < 80);
-
-    if (weak_but_accepted || emergency_reinit) {
+    if (frontend.shouldReinitialize(
+            frame_id, frame_stats.pose_accepted,
+            static_cast<int>(track_result.curr_points.size()))) {
       std::cout << "Reinitializing at frame " << frame_id << "\n";
 
       const svo::StereoInitResult reinit_result =
           initializer.run(curr_frame, camera);
 
       if (reinit_result.num_triangulated >= 20) {
-        active_points_2d = makeInitialActivePoints(reinit_result);
-
         std::vector<svo::MapPoint> new_landmarks =
             makeInitialActiveLandmarks(reinit_result);
         map.assignNewLandmarkIds(new_landmarks);
 
-        active_landmarks =
-            transformLandmarksToWorld(new_landmarks, poses.back());
+        new_landmarks =
+            transformLandmarksToWorld(new_landmarks, frontend.currentPose());
 
-        map.setActiveLandmarks(active_landmarks);
+        frontend.setActiveTracks(makeInitialActivePoints(reinit_result), new_landmarks);
+        map.setActiveLandmarks(new_landmarks);
 
-        last_init_frame_id = frame_id;
-        reinitialized = true;
-        consecutive_rejected_poses = 0;
+        frontend.noteReinitialized(frame_id);
+        frame_stats.reinitialized = true;
       } else {
-        active_points_2d = track_result.curr_points;
-        active_landmarks = track_result.tracked_landmarks;
+        frontend.setActiveTracks(track_result.curr_points, track_result.tracked_landmarks);
       }
     } else {
-      active_points_2d = track_result.curr_points;
-      active_landmarks = track_result.tracked_landmarks;
+      frontend.setActiveTracks(track_result.curr_points,
+                               track_result.tracked_landmarks);
     }
 
-    // ---------------------------------------------------------------------
-    // Landmark bookkeeping
-    // ---------------------------------------------------------------------
-    map.markTrackedLandmarks(track_result.tracked_landmarks);
-    map.markMissedLandmarks(track_result.landmark_ids);
-    map.pruneLandmarks();
+    if (!frame_stats.reinitialized) {
+      map.markTrackedLandmarks(track_result.tracked_landmarks);
+      map.markMissedLandmarks(track_result.landmark_ids);
+      map.pruneLandmarks();
+    }
 
     // ---------------------------------------------------------------------
     // Keyframe insertion
     // ---------------------------------------------------------------------
-    if (pose_accepted) {
-      curr_frame.pose_wc = poses.back();
-      curr_frame.tracked_points = active_points_2d;
+    if (frame_stats.pose_accepted) {
+      curr_frame.pose_wc = frontend.currentPose();
+      curr_frame.tracked_points = frontend.activePoints();
       curr_frame.tracked_landmark_ids.clear();
-      curr_frame.tracked_landmark_ids.reserve(active_landmarks.size());
-      for (const auto &landmark : active_landmarks) {
+      for (const auto& landmark : frontend.activeLandmarks()) {
         curr_frame.tracked_landmark_ids.push_back(landmark.id);
       }
 
-      if (frontend.needNewKeyframe(last_keyframe_pose_wc, curr_frame.pose_wc,
-                                   static_cast<int>(active_points_2d.size()),
-                                   frame_id, last_keyframe_frame_id)) {
+      if (frontend.needNewKeyframe(curr_frame.pose_wc, static_cast<int>(frontend.activePoints().size()), frame_id)) {
         curr_frame.is_keyframe = true;
         map.addKeyframe(curr_frame);
 
-        const svo::StereoInitResult keyframe_init_result =
-            initializer.run(curr_frame, camera);
+        const svo::StereoInitResult keyframe_init_result = initializer.run(curr_frame, camera);
 
         if (keyframe_init_result.num_triangulated >= 20) {
-          std::vector<svo::MapPoint> new_landmarks =
-              makeInitialActiveLandmarks(keyframe_init_result);
+          std::vector<svo::MapPoint> new_landmarks = makeInitialActiveLandmarks(keyframe_init_result);
           map.assignNewLandmarkIds(new_landmarks);
 
-          new_landmarks =
-              transformLandmarksToWorld(new_landmarks, curr_frame.pose_wc);
+          new_landmarks = transformLandmarksToWorld(new_landmarks, curr_frame.pose_wc);
 
           map.addLandmarks(new_landmarks);
 
-          active_points_2d = makeInitialActivePoints(keyframe_init_result);
-          active_landmarks = new_landmarks;
+          frontend.setActiveTracks(makeInitialActivePoints(keyframe_init_result), new_landmarks);
         }
 
         // -------------------------
         // Local bundle adjustment
         // -------------------------
-        if (map.numActiveKeyframes() >= 3 && map.numActiveLandmarks() >= 20 &&
-            inserted_keyframes_since_last_ba >= local_ba_keyframe_interval) {
+        if (map.numActiveKeyframes() >= 3 && map.numActiveLandmarks() >= 20 && frontend.insertedKeyframesSinceLastBa() >= frontend.localBaKeyframeInterval()) {
           std::vector<svo::Frame> keyframe_backup = map.activeKeyframes();
           std::vector<svo::MapPoint> landmarks_backup = map.activeLandmarks();
 
-          svo::LocalBAResult ba_result = estimator.runLocalBundleAdjustment(
-              map.mutableActiveKeyframes(), map.mutableActiveLandmarks(),
-              camera);
+          svo::LocalBAResult ba_result = estimator.runLocalBundleAdjustment(map.mutableActiveKeyframes(), map.mutableActiveLandmarks(), camera);
 
-          if (ba_result.success && ba_result.rmse_after > 0.0 &&
-              ba_result.rmse_after <= ba_result.rmse_before) {
-            ran_local_ba = true;
-            ba_rmse_before = ba_result.rmse_before;
-            ba_rmse_after = ba_result.rmse_after;
+          if (ba_result.success && ba_result.rmse_after > 0.0 && ba_result.rmse_after <= ba_result.rmse_before) {
+            frame_stats.ran_local_ba = true;
+            frame_stats.local_ba_accepted = true;
+            frame_stats.ba_rmse_before = ba_result.rmse_before;
+            frame_stats.ba_rmse_after = ba_result.rmse_after;
 
-            active_landmarks = refreshTrackedLandmarksFromMap(
-                active_landmarks, map.activeLandmarks());
-
-            inserted_keyframes_since_last_ba = 0;
-
-            local_ba_accepted = true;
+            frontend.refreshActiveLandmarksFromMap(map.activeLandmarks());
+            frontend.noteLocalBaAccepted();
 
             std::cout << "Local BA at frame " << frame_id
-                      << " | keyframes: " << ba_result.num_keyframes
-                      << " | landmarks: " << ba_result.num_landmarks
-                      << " | observations: " << ba_result.num_observations
-                      << " | rmse: " << ba_result.rmse_before << " -> "
-                      << ba_result.rmse_after << "\n";
+                      << "  | keyframes: " << ba_result.num_keyframes
+                      << "  | landmarks: " << ba_result.num_landmarks
+                      << "  | observations: " << ba_result.num_observations
+                      << "  | rmse: " << ba_result.rmse_before
+                      << " -> " << ba_result.rmse_after << "\n";
           } else {
             map.mutableActiveKeyframes() = keyframe_backup;
             map.mutableActiveLandmarks() = landmarks_backup;
 
-            local_ba_rejected = true;
-
+            frame_stats.local_ba_rejected = true;
             if (ba_result.success) {
-              ba_rmse_before = ba_result.rmse_before;
-              ba_rmse_after = ba_result.rmse_after;
+              frame_stats.ba_rmse_before = ba_result.rmse_before;
+              frame_stats.ba_rmse_after = ba_result.rmse_after;
             }
 
-            std::cout << "Rejected local BA at frame " << frame_id;
-
-            if (ba_result.success) {
-              std::cout << " | rmse: " << ba_result.rmse_before << " -> "
-                        << ba_result.rmse_after;
-            }
-
-            std::cout << "\n";
+            std::cout << "Rejected local BA at frame " << frame_id << "\n";
           }
         }
 
-        last_keyframe_frame_id = frame_id;
-        last_keyframe_pose_wc = curr_frame.pose_wc;
-        inserted_keyframe = true;
-        inserted_keyframes_since_last_ba++;
+        frontend.noteKeyframeInserted(frame_id, curr_frame.pose_wc);
+        frame_stats.inserted_keyframe = true;
 
         std::cout << "Inserted keyframe at frame " << frame_id
-                  << " | active keyframes: " << map.numActiveKeyframes()
-                  << " | active landmarks: " << map.numActiveLandmarks()
-                  << "\n";
+        << "  | active keyframes: " << map.numActiveKeyframes()
+        << "  | active landmarks: " << map.numActiveLandmarks() << "\n";
       }
     }
 
     // ---------------------------------------------------------------------
     // Logging + debug output
     // ---------------------------------------------------------------------
-    const Eigen::Vector3d t_out = poses.back().block<3, 1>(0, 3);
+    const Eigen::Vector3d t_out = frontend.currentPose().block<3, 1>(0, 3);
 
-    stats << frame_id << "," << active_points_2d.size() << ","
-          << track_result.num_valid_correspondences << "," << num_inliers << ","
-          << inlier_ratio << "," << (pose_success ? 1 : 0) << ","
-          << (pose_accepted ? 1 : 0) << "," << (reinitialized ? 1 : 0) << ","
-          << (inserted_keyframe ? 1 : 0) << "," << map.numActiveKeyframes()
-          << "," << map.numActiveLandmarks() << "," << (ran_local_ba ? 1 : 0)
-          << ","
-          << (local_ba_accepted ? 1 : 0) << ","
-          << (local_ba_rejected ? 1 : 0) << ","
-          << ba_rmse_before << "," << ba_rmse_after << "," << t_out(0)
-          << "," << t_out(1) << "," << t_out(2) << "," << delta_t << ","
-          << rmse_before << "," << rmse_after << "\n";
+    stats << frame_id << "," << frontend.activePoints().size() << ","
+          << track_result.num_valid_correspondences << ","
+          << frame_stats.num_inliers << "," << frame_stats.inlier_ratio << ","
+          << (frame_stats.pose_success ? 1 : 0) << ","
+          << (frame_stats.pose_accepted ? 1 : 0) << ","
+          << (frame_stats.reinitialized ? 1 : 0) << ","
+          << (frame_stats.inserted_keyframe ? 1 : 0) << ","
+          << map.numActiveKeyframes() << "," << map.numActiveLandmarks() << ","
+          << (frame_stats.ran_local_ba ? 1 : 0) << ","
+          << (frame_stats.local_ba_accepted ? 1 : 0) << ","
+          << (frame_stats.local_ba_rejected ? 1 : 0) << ","
+          << frame_stats.ba_rmse_before << "," << frame_stats.ba_rmse_after
+          << "," << t_out(0) << "," << t_out(1) << "," << t_out(2) << ","
+          << frame_stats.delta_t << "," << frame_stats.rmse_before << ","
+          << frame_stats.rmse_after << "\n";
 
     const bool save_sparse_debug = (frame_id % 10 == 0);
-    const bool save_dense_debug =
-        (dense_debug_center >= 0) &&
-        isInDebugWindow(frame_id, dense_debug_center, 5);
+    const bool save_dense_debug = frontend.shouldSaveDenseDebug(frame_id, 5);
 
     if (!track_result.track_vis.empty() &&
         (save_sparse_debug || save_dense_debug)) {
@@ -634,28 +543,49 @@ int main(int argc, char **argv) {
     }
 
     std::cout << "frame " << frame_id
-              << " | active: " << active_points_2d.size()
+              << " | active: " << frontend.activePoints().size()
               << " | corr: " << track_result.num_valid_correspondences
-              << " | inliers: " << num_inliers << " | ratio: " << inlier_ratio
-              << " | delta_t: " << delta_t
-              << " | pose_success: " << pose_success
-              << " | pose_accepted: " << pose_accepted
-              << " | reinit: " << reinitialized
-              << " | keyframe: " << inserted_keyframe << "\n";
+              << " | inliers: " << frame_stats.num_inliers
+              << " | ratio: " << frame_stats.inlier_ratio
+              << " | delta_t: " << frame_stats.delta_t
+              << " | pose_success: " << frame_stats.pose_success
+              << " | pose_accepted: " << frame_stats.pose_accepted
+              << " | reinit: " << frame_stats.reinitialized
+              << " | keyframe: " << frame_stats.inserted_keyframe << "\n";
 
-    if (active_points_2d.size() < 20) {
+    if (frontend.activePoints().size() < 20) {
       std::cout << "Tracking dropped below threshold at frame " << frame_id
                 << ". Stopping early.\n";
       break;
     }
 
-    prev_frame = curr_frame;
+    frontend.setPreviousFrame(curr_frame);
+
+    svo::ViewerStatus viewer_status;
+    viewer_status.frame_id = frame_id;
+    viewer_status.num_active_points =
+        static_cast<int>(frontend.activePoints().size());
+    viewer_status.num_correspondences = track_result.num_valid_correspondences;
+    viewer_status.num_inliers = frame_stats.num_inliers;
+    viewer_status.pose_accepted = frame_stats.pose_accepted;
+    viewer_status.reinitialized = frame_stats.reinitialized;
+    viewer_status.inserted_keyframe = frame_stats.inserted_keyframe;
+    viewer_status.ran_local_ba = frame_stats.ran_local_ba;
+    viewer_status.delta_t = frame_stats.delta_t;
+    viewer_status.rmse_before = frame_stats.rmse_before;
+    viewer_status.rmse_after = frame_stats.rmse_after;
+
+    if (!viewer.update(curr_frame.left_img, frontend.activePoints(), frontend.poses(), gt_poses,
+                       viewer_status)) {
+      std::cout << "Viewer requested exit.\n";
+      break;
+    }
   }
 
   // -------------------------------------------------------------------------
   // Final trajectory write
   // -------------------------------------------------------------------------
-  writeKittiTrajectory(output_pose, poses);
+  svo::PoseWriter::writeKittiTrajectory(output_pose, frontend.poses());
   std::cout << "Wrote VO trajectory to: " << output_pose << "\n";
 
   return 0;
