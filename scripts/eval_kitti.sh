@@ -9,6 +9,7 @@ fi
 
 SEQ="$1"
 EST="$2"
+EST_BASE=$(basename "$EST" .txt)
 GT="data/kitti/poses/${SEQ}.txt"
 OUT_DIR="results/tables/${SEQ}"
 
@@ -29,19 +30,19 @@ echo "GT : $GT"
 echo "EST: $EST"
 
 evo_traj kitti "$EST" --ref="$GT" -p --plot_mode=xz \
-  --save_plot "${OUT_DIR}/traj_xz.pdf"
+  --save_plot "${OUT_DIR}/${EST_BASE}_traj_xz.pdf"
 
 evo_ape kitti "$GT" "$EST" -va --plot --plot_mode=xz \
-  --save_plot "${OUT_DIR}/ape_xz.pdf" \
-  --save_results "${OUT_DIR}/ape.zip"
+  --save_plot "${OUT_DIR}/${EST_BASE}_ape_xz.pdf" \
+  --save_results "${OUT_DIR}/${EST_BASE}_ape.zip"
 
 evo_rpe kitti "$GT" "$EST" -va --plot --plot_mode=xz \
-  --save_plot "${OUT_DIR}/rpe_xz.pdf" \
-  --save_results "${OUT_DIR}/rpe.zip"
+  --save_plot "${OUT_DIR}/${EST_BASE}_rpe_xz.pdf" \
+  --save_results "${OUT_DIR}/${EST_BASE}_rpe.zip"
 
 echo "Saved results to $OUT_DIR"
 
-python3 - "$SEQ" "$EST" "${OUT_DIR}/ape.zip" "${OUT_DIR}/rpe.zip" "results/metrics_log.csv" <<'PYEOF'
+python3 - "$SEQ" "$EST" "${OUT_DIR}/${EST_BASE}_ape.zip" "${OUT_DIR}/${EST_BASE}_rpe.zip" "results/metrics_log.csv" <<'PYEOF'
 import sys, zipfile, json, csv, os
 from datetime import datetime
 
