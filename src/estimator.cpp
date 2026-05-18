@@ -51,6 +51,7 @@ Eigen::Matrix3d leftJacobianSO3(const Eigen::Vector3d &w) {
          ((theta - std::sin(theta)) / theta3) * W * W;
 }
 
+// left perturbation: T' = exp(xi) * T
 void applyLeftSE3Increment(const Eigen::Matrix<double, 6, 1> &dx,
                            Eigen::Matrix3d &R_cw, Eigen::Vector3d &t_cw) {
   const Eigen::Vector3d dtheta = dx.head<3>();
