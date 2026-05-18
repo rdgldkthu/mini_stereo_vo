@@ -349,7 +349,7 @@ int main(int argc, char **argv) {
 
       const Eigen::Vector3d t_out = frontend.currentPose().block<3, 1>(0, 3);
       stats << frame_id << ",0,0,0,0.0,0,0,0,0," << map.numActiveKeyframes()
-            << "," << map.numActiveLandmarks() << "," << "0,0,0,0,0" << t_out(0)
+            << "," << map.numActiveLandmarks() << "," << "0,0,0,0,0," << t_out(0)
             << "," << t_out(1) << "," << t_out(2) << ",0,0,0\n";
       continue;
     }

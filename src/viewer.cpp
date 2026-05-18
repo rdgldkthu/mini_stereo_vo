@@ -89,7 +89,7 @@ cv::Mat Viewer::drawTrajectoryView(const std::vector<Eigen::Matrix4d> &poses,
       const cv::Point p1 = project(t1);
 
       if (p0.x >= 0 && p0.x < size && p0.y >= 0 && p0.y < size && p1.x >= 0 &&
-          p1.x < size && p1.x >= 0 && p1.y < size) {
+          p1.x < size && p1.y >= 0 && p1.y < size) {
         cv::line(traj, p0, p1, cv::Scalar(0, 180, 0), 2);
       }
     }
@@ -97,7 +97,7 @@ cv::Mat Viewer::drawTrajectoryView(const std::vector<Eigen::Matrix4d> &poses,
     if (gt_end >= 0) {
       const Eigen::Vector3d t_gt = gt_poses[gt_end].block<3, 1>(0, 3);
       const cv::Point p_gt = project(t_gt);
-      if (p_gt.x >= 0 && p_gt.y < size && p_gt.y >= 0 && p_gt.y < size) {
+      if (p_gt.x >= 0 && p_gt.x < size && p_gt.y >= 0 && p_gt.y < size) {
         cv::circle(traj, p_gt, 4, cv::Scalar(255, 0, 0), -1);
       }
     }
@@ -111,7 +111,7 @@ cv::Mat Viewer::drawTrajectoryView(const std::vector<Eigen::Matrix4d> &poses,
     const cv::Point p1 = project(t1);
 
     if (p0.x >= 0 && p0.x < size && p0.y >= 0 && p0.y < size && p1.x >= 0 &&
-        p1.x < size && p1.x >= 0 && p1.y < size) {
+        p1.x < size && p1.y >= 0 && p1.y < size) {
       cv::line(traj, p0, p1, cv::Scalar(0, 255, 255), 2);
     }
   }
