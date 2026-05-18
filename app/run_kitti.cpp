@@ -309,7 +309,7 @@ int main(int argc, char **argv) {
       makeInitialActiveLandmarks(init_result);
   map.assignNewLandmarkIds(active_landmarks);
 
-  frontend.initialize(frame0, init_result, active_landmarks);
+  frontend.initialize(frame0, makeInitialActivePoints(init_result), active_landmarks);
 
   frame0.pose_wc = Eigen::Matrix4d::Identity();
   frame0.is_keyframe = true;

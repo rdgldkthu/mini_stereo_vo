@@ -5,29 +5,10 @@
 #include <unordered_map>
 
 namespace svo {
-namespace {
-
-std::vector<cv::Point2f>
-makeInitialActivePoints(const StereoInitResult &init_result) {
-  std::vector<cv::Point2f> points;
-
-  const size_t n =
-      std::min(init_result.features.size(), init_result.landmarks.size());
-  points.reserve(n);
-
-  for (size_t i = 0; i < n; ++i) {
-    points.push_back(init_result.features[i].kp_left.pt);
-  }
-
-  return points;
-}
-
-} // namespace
-
 Frontend::Frontend(const Options &options) : options_(options) {}
 
 void Frontend::initialize(const Frame &frame0,
-                          const StereoInitResult &init_result,
+                          std::vector<cv::Point2f> active_points,
                           std::vector<MapPoint> active_landmarks) {
   poses_.clear();
   poses_.push_back(Eigen::Matrix4d::Identity());
@@ -36,7 +17,7 @@ void Frontend::initialize(const Frame &frame0,
   prev_frame_.pose_wc = Eigen::Matrix4d::Identity();
   prev_frame_.is_keyframe = true;
 
-  active_points_2d_ = makeInitialActivePoints(init_result);
+  active_points_2d_ = std::move(active_points);
   active_landmarks_ = std::move(active_landmarks);
 
   last_keyframe_frame_id_ = frame0.id;

@@ -8,7 +8,6 @@
 
 #include "svo/frame.h"
 #include "svo/map_point.h"
-#include "svo/stereo_initializer.h"
 
 namespace svo {
 
@@ -53,7 +52,7 @@ public:
 
   explicit Frontend(const Options &options);
 
-  void initialize(const Frame &frame0, const StereoInitResult &init_result,
+  void initialize(const Frame &frame0, std::vector<cv::Point2f> active_points,
                   std::vector<MapPoint> active_landmarks);
 
   bool needNewKeyframe(const Eigen::Matrix4d &current_pose_wc,
