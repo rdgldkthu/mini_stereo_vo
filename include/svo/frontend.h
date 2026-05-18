@@ -82,6 +82,7 @@ public:
   void notePoseRejected(int frame_id);
   void noteKeyframeInserted(int frame_id, const Eigen::Matrix4d &pose_wc);
   void noteLocalBaAccepted();
+  bool shouldRunLocalBA();
 
   const std::vector<Eigen::Matrix4d> &poses() const { return poses_; }
   const Eigen::Matrix4d &currentPose() const { return poses_.back(); }
@@ -97,14 +98,6 @@ public:
   std::vector<MapPoint> &activeLandmarks() { return active_landmarks_; }
   const std::vector<MapPoint> &activeLandmarks() const {
     return active_landmarks_;
-  }
-
-  int insertedKeyframesSinceLastBa() const {
-    return inserted_keyframes_since_last_ba_;
-  }
-
-  int localBaKeyframeInterval() const {
-    return options_.local_ba_keyframe_interval;
   }
 
 private:

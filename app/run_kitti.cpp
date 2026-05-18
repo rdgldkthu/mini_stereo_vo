@@ -488,10 +488,13 @@ int main(int argc, char **argv) {
           map.addKeyframe(curr_frame);
         }
 
+        frontend.noteKeyframeInserted(frame_id, curr_frame.pose_wc);
+        frame_stats.inserted_keyframe = true;
+
         // -------------------------
         // Local bundle adjustment
         // -------------------------
-        if (map.numActiveKeyframes() >= 3 && map.numActiveLandmarks() >= 20 && frontend.insertedKeyframesSinceLastBa() >= frontend.localBaKeyframeInterval()) {
+        if (map.numActiveKeyframes() >= 3 && map.numActiveLandmarks() >= 20 && frontend.shouldRunLocalBA()) {
           std::vector<svo::Frame> keyframe_backup = map.activeKeyframes();
           std::vector<svo::MapPoint> landmarks_backup = map.activeLandmarks();
 
@@ -525,9 +528,6 @@ int main(int argc, char **argv) {
             std::cout << "Rejected local BA at frame " << frame_id << "\n";
           }
         }
-
-        frontend.noteKeyframeInserted(frame_id, curr_frame.pose_wc);
-        frame_stats.inserted_keyframe = true;
 
         std::cout << "Inserted keyframe at frame " << frame_id
         << "  | active keyframes: " << map.numActiveKeyframes()

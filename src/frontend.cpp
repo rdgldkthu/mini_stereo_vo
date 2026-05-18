@@ -115,6 +115,15 @@ void Frontend::noteKeyframeInserted(int frame_id,
 
 void Frontend::noteLocalBaAccepted() { inserted_keyframes_since_last_ba_ = 0; }
 
+bool Frontend::shouldRunLocalBA() {
+  if (inserted_keyframes_since_last_ba_ >=
+      options_.local_ba_keyframe_interval) {
+    inserted_keyframes_since_last_ba_ = 0;
+    return true;
+  }
+  return false;
+}
+
 void Frontend::repeatLastPose() { poses_.push_back(poses_.back()); }
 
 void Frontend::rejectPose(int frame_id, int /*num_correspondences*/,
