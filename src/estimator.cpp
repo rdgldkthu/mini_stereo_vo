@@ -638,7 +638,7 @@ Estimator::runLocalBundleAdjustment(std::deque<Frame> &keyframes,
   // -------------------------------------------------------------------------
   // Write back optimized poses and landmarks
   // -------------------------------------------------------------------------
-  for (int k = 0; k < num_keyframes; ++k) {
+  for (int k = 1; k < num_keyframes; ++k) {
     const Eigen::Matrix3d R_wc = rotations_cw[k].transpose();
     const Eigen::Vector3d t_wc = -R_wc * translations_cw[k];
 
