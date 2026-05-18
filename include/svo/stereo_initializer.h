@@ -64,6 +64,7 @@ private:
 
 private:
   Options options_;
+  cv::Ptr<cv::ORB> orb_;
 };
 
 } // namespace svo

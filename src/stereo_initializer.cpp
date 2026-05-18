@@ -9,7 +9,7 @@
 namespace svo {
 
 StereoInitializer::StereoInitializer(const Options &options)
-    : options_(options) {}
+    : options_(options), orb_(cv::ORB::create(options_.max_features)) {}
 
 cv::Mat StereoInitializer::makeDetectionMask(const cv::Size& image_size) const {
   cv::Mat mask(image_size, CV_8UC1, cv::Scalar(255));
@@ -45,8 +45,6 @@ StereoInitResult StereoInitializer::run(const Frame &frame,
     return result;
   }
 
-  cv::Ptr<cv::ORB> orb = cv::ORB::create(options_.max_features);
-
   const cv::Mat left_mask = makeDetectionMask(frame.left_img.size());
   const cv::Mat right_mask = makeDetectionMask(frame.right_img.size());
 
@@ -54,8 +52,8 @@ StereoInitResult StereoInitializer::run(const Frame &frame,
   std::vector<cv::KeyPoint> kps_right;
   cv::Mat desc_left, desc_right;
 
-  orb->detectAndCompute(frame.left_img, left_mask, kps_left, desc_left);
-  orb->detectAndCompute(frame.right_img, right_mask, kps_right, desc_right);
+  orb_->detectAndCompute(frame.left_img, left_mask, kps_left, desc_left);
+  orb_->detectAndCompute(frame.right_img, right_mask, kps_right, desc_right);
 
   result.num_left_keypoints = static_cast<int>(kps_left.size());
   result.num_right_keypoints = static_cast<int>(kps_right.size());
