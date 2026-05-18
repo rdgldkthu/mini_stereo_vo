@@ -12,7 +12,7 @@ void Map::addKeyframe(const Frame &frame) {
 
   if (static_cast<int>(active_keyframes_.size()) >
       options_.max_active_keyframes) {
-    active_keyframes_.erase(active_keyframes_.begin());
+    active_keyframes_.pop_front();
   }
 }
 
@@ -132,11 +132,11 @@ void Map::pruneLandmarks() {
   rebuildIndex();
 }
 
-const std::vector<Frame> &Map::activeKeyframes() const {
+const std::deque<Frame> &Map::activeKeyframes() const {
   return active_keyframes_;
 }
 
-std::vector<Frame> &Map::mutableActiveKeyframes() {
+std::deque<Frame> &Map::mutableActiveKeyframes() {
   return active_keyframes_;
 }
 

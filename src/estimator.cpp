@@ -369,7 +369,7 @@ PoseEstimateResult Estimator::refinePosePoseOnly(
 }
 
 LocalBAResult
-Estimator::runLocalBundleAdjustment(std::vector<Frame> &keyframes,
+Estimator::runLocalBundleAdjustment(std::deque<Frame> &keyframes,
                                     std::vector<MapPoint> &landmarks,
                                     const Camera &camera) const {
   LocalBAResult result;

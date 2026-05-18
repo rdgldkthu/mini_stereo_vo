@@ -499,7 +499,7 @@ int main(int argc, char **argv) {
         // Local bundle adjustment
         // -------------------------
         if (map.numActiveKeyframes() >= 3 && map.numActiveLandmarks() >= 20 && frontend.shouldRunLocalBA()) {
-          std::vector<svo::Frame> keyframe_backup = map.activeKeyframes();
+          std::deque<svo::Frame> keyframe_backup = map.activeKeyframes();
           std::vector<svo::MapPoint> landmarks_backup = map.activeLandmarks();
 
           svo::LocalBAResult ba_result = estimator.runLocalBundleAdjustment(map.mutableActiveKeyframes(), map.mutableActiveLandmarks(), camera);

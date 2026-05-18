@@ -1,6 +1,7 @@
 #ifndef SVO_ESTIMATOR_H
 #define SVO_ESTIMATOR_H
 
+#include <deque>
 #include <vector>
 
 #include <Eigen/Core>
@@ -86,7 +87,7 @@ public:
                      const Eigen::Matrix3d &initial_rotation_cw,
                      const Eigen::Vector3d &initial_translation_cw) const;
 
-  LocalBAResult runLocalBundleAdjustment(std::vector<Frame> &keyframes,
+  LocalBAResult runLocalBundleAdjustment(std::deque<Frame> &keyframes,
                                          std::vector<MapPoint> &landmarks,
                                          const Camera &camera) const;
 

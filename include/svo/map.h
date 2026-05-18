@@ -1,6 +1,7 @@
 #ifndef SVO_MAP_H
 #define SVO_MAP_H
 
+#include <deque>
 #include <unordered_map>
 #include <vector>
 
@@ -32,8 +33,8 @@ public:
 
   void pruneLandmarks();
 
-  const std::vector<Frame> &activeKeyframes() const;
-  std::vector<Frame> &mutableActiveKeyframes();
+  const std::deque<Frame> &activeKeyframes() const;
+  std::deque<Frame> &mutableActiveKeyframes();
 
   const std::vector<MapPoint> &activeLandmarks() const;
   std::vector<MapPoint> &mutableActiveLandmarks();
@@ -47,7 +48,7 @@ private:
 
 private:
   Options options_;
-  std::vector<Frame> active_keyframes_;
+  std::deque<Frame> active_keyframes_;
   std::vector<MapPoint> active_landmarks_;
   std::unordered_map<int, size_t> id_to_index_;
 
