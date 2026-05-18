@@ -466,7 +466,6 @@ int main(int argc, char **argv) {
 
       if (frontend.needNewKeyframe(curr_frame.pose_wc, static_cast<int>(frontend.activePoints().size()), frame_id)) {
         curr_frame.is_keyframe = true;
-        map.addKeyframe(curr_frame);
 
         const svo::StereoInitResult keyframe_init_result = initializer.run(curr_frame, camera);
 
@@ -476,9 +475,17 @@ int main(int argc, char **argv) {
 
           new_landmarks = transformLandmarksToWorld(new_landmarks, curr_frame.pose_wc);
 
-          map.addLandmarks(new_landmarks);
+          const auto new_points = makeInitialActivePoints(keyframe_init_result);
+          curr_frame.tracked_points.insert(curr_frame.tracked_points.end(), new_points.begin(), new_points.end());
+          for (const auto &lm : new_landmarks) {
+            curr_frame.tracked_landmark_ids.push_back(lm.id);
+          }
 
-          frontend.setActiveTracks(makeInitialActivePoints(keyframe_init_result), new_landmarks);
+          map.addKeyframe(curr_frame);
+          map.addLandmarks(new_landmarks);
+          frontend.setActiveTracks(new_points, new_landmarks);
+        } else {
+          map.addKeyframe(curr_frame);
         }
 
         // -------------------------
