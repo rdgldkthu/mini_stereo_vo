@@ -625,6 +625,17 @@ int main(int argc, char **argv) {
             << "  |  frames: " << frames_processed
             << "  |  avg: " << avg_ms << " ms/frame\n";
 
+  {
+    const fs::path time_log_path = "results/time_log.csv";
+    const bool write_header = !fs::exists(time_log_path);
+    std::ofstream time_log(time_log_path, std::ios::app);
+    if (write_header) {
+      time_log << "date,sequence,keyword,frames,total_s,avg_ms_per_frame\n";
+    }
+    time_log << date_str << "," << sequence << "," << pose_keyword << ","
+             << frames_processed << "," << total_s << "," << avg_ms << "\n";
+  }
+
   svo::PoseWriter::writeKittiTrajectory(output_pose, frontend.poses());
   std::cout << "Wrote VO trajectory to: " << output_pose << "\n";
 
