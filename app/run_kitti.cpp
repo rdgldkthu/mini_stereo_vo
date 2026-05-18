@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <ctime>
 #include <filesystem>
@@ -338,6 +339,9 @@ int main(int argc, char **argv) {
   // -------------------------------------------------------------------------
   // Main VO loop
   // -------------------------------------------------------------------------
+  const auto loop_start = std::chrono::steady_clock::now();
+  int frames_processed = 0;
+
   for (int frame_id = 1; frame_id < dataset.numFrames(); ++frame_id) {
     svo::Frame curr_frame;
     if (!dataset.loadFrame(frame_id, curr_frame)) {
@@ -605,11 +609,22 @@ int main(int argc, char **argv) {
       std::cout << "Viewer requested exit.\n";
       break;
     }
+
+    ++frames_processed;
   }
 
   // -------------------------------------------------------------------------
   // Final trajectory write
   // -------------------------------------------------------------------------
+  const auto loop_end = std::chrono::steady_clock::now();
+  const double total_s =
+      std::chrono::duration<double>(loop_end - loop_start).count();
+  const double avg_ms =
+      frames_processed > 0 ? (total_s / frames_processed) * 1000.0 : 0.0;
+  std::cout << "Total time: " << total_s << " s"
+            << "  |  frames: " << frames_processed
+            << "  |  avg: " << avg_ms << " ms/frame\n";
+
   svo::PoseWriter::writeKittiTrajectory(output_pose, frontend.poses());
   std::cout << "Wrote VO trajectory to: " << output_pose << "\n";
 
