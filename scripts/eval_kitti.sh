@@ -74,7 +74,7 @@ fields = ['datetime', 'sequence', 'est_traj',
           'ape_rmse', 'ape_mean', 'ape_median', 'ape_std', 'ape_min', 'ape_max',
           'rpe_rmse', 'rpe_mean', 'rpe_median', 'rpe_std', 'rpe_min', 'rpe_max']
 
-row = [datetime.now().strftime('%Y-%m-%d %H:%M:%S'), seq, est,
+row = [datetime.now().strftime('%-m/%-d/%y %H:%M'), str(int(seq)), est,
        ape['rmse'], ape['mean'], ape['median'], ape['std'], ape['min'], ape['max'],
        rpe['rmse'], rpe['mean'], rpe['median'], rpe['std'], rpe['min'], rpe['max']]
 
