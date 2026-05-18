@@ -23,6 +23,8 @@ void Map::setActiveLandmarks(const std::vector<MapPoint> &landmarks) {
       options_.max_active_landmarks) {
     active_landmarks_.resize(options_.max_active_landmarks);
   }
+
+  rebuildIndex();
 }
 
 void Map::assignNewLandmarkIds(std::vector<MapPoint>& landmarks) {
@@ -32,12 +34,19 @@ void Map::assignNewLandmarkIds(std::vector<MapPoint>& landmarks) {
 }
 
 int Map::findLandmarkIndexById(int landmark_id) const {
-  for (size_t i = 0; i < active_landmarks_.size(); ++i) {
-    if (active_landmarks_[i].id == landmark_id) {
-      return static_cast<int>(i);
-    }
+  const auto it = id_to_index_.find(landmark_id);
+  if (it != id_to_index_.end()) {
+    return static_cast<int>(it->second);
   }
   return -1;
+}
+
+void Map::rebuildIndex() {
+  id_to_index_.clear();
+  id_to_index_.reserve(active_landmarks_.size());
+  for (size_t i = 0; i < active_landmarks_.size(); ++i) {
+    id_to_index_[active_landmarks_[i].id] = i;
+  }
 }
 
 void Map::addLandmarks(const std::vector<MapPoint> &landmarks) {
@@ -52,6 +61,7 @@ void Map::addLandmarks(const std::vector<MapPoint> &landmarks) {
       active_landmarks_[idx].is_active = landmark.is_active;
       active_landmarks_[idx].is_outlier = landmark.is_outlier;
     } else {
+      id_to_index_[landmark.id] = active_landmarks_.size();
       active_landmarks_.push_back(landmark);
     }
   }
@@ -70,6 +80,7 @@ void Map::addLandmarks(const std::vector<MapPoint> &landmarks) {
               });
 
     active_landmarks_.resize(active_landmarks_.size() - extra);
+    rebuildIndex();
   }
 }
 
@@ -118,6 +129,7 @@ void Map::pruneLandmarks() {
   }
 
   active_landmarks_.swap(kept);
+  rebuildIndex();
 }
 
 const std::vector<Frame> &Map::activeKeyframes() const {

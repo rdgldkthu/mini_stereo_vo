@@ -1,6 +1,7 @@
 #ifndef SVO_MAP_H
 #define SVO_MAP_H
 
+#include <unordered_map>
 #include <vector>
 
 #include "svo/frame.h"
@@ -42,11 +43,13 @@ public:
 
 private:
   int findLandmarkIndexById(int landmark_id) const;
+  void rebuildIndex();
 
 private:
   Options options_;
   std::vector<Frame> active_keyframes_;
   std::vector<MapPoint> active_landmarks_;
+  std::unordered_map<int, size_t> id_to_index_;
 
   int next_landmark_id = 0;
 };
