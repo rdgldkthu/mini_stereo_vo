@@ -46,7 +46,8 @@ public:
   TrackResult
   trackFrameToFrame(const Frame &prev_frame, const Frame &curr_frame,
                     const std::vector<cv::Point2f> &prev_points,
-                    const std::vector<MapPoint> &prev_landmarks) const;
+                    const std::vector<MapPoint> &prev_landmarks,
+                    bool build_visualization = false) const;
 
 private:
   bool isInsideImage(const cv::Point2f &pt, const cv::Size &image_size) const;

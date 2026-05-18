@@ -290,7 +290,7 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  const svo::StereoInitResult init_result = initializer.run(frame0, camera);
+  const svo::StereoInitResult init_result = initializer.run(frame0, camera, save_debug);
 
   std::cout << "Stereo initialization result:\n";
   std::cout << "  triangulated: " << init_result.num_triangulated << "\n";
@@ -357,7 +357,7 @@ int main(int argc, char **argv) {
 
     const svo::TrackResult track_result = tracker.trackFrameToFrame(
         frontend.previousFrame(), curr_frame, frontend.activePoints(),
-        frontend.activeLandmarks());
+        frontend.activeLandmarks(), save_debug);
 
     svo::FrontendFrameStats frame_stats;
     Eigen::Matrix4d candidate_pose = frontend.currentPose();
@@ -428,7 +428,7 @@ int main(int argc, char **argv) {
       std::cout << "Reinitializing at frame " << frame_id << "\n";
 
       const svo::StereoInitResult reinit_result =
-          initializer.run(curr_frame, camera);
+          initializer.run(curr_frame, camera, false);
 
       if (reinit_result.num_triangulated >= 20) {
         std::vector<svo::MapPoint> new_landmarks =
@@ -471,7 +471,7 @@ int main(int argc, char **argv) {
       if (frontend.needNewKeyframe(curr_frame.pose_wc, static_cast<int>(frontend.activePoints().size()), frame_id)) {
         curr_frame.is_keyframe = true;
 
-        const svo::StereoInitResult keyframe_init_result = initializer.run(curr_frame, camera);
+        const svo::StereoInitResult keyframe_init_result = initializer.run(curr_frame, camera, false);
 
         if (keyframe_init_result.num_triangulated >= 20) {
           std::vector<svo::MapPoint> new_landmarks = makeInitialActiveLandmarks(keyframe_init_result);

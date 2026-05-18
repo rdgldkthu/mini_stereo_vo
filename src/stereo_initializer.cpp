@@ -38,7 +38,8 @@ cv::Mat StereoInitializer::makeDetectionMask(const cv::Size& image_size) const {
 }
 
 StereoInitResult StereoInitializer::run(const Frame &frame,
-                                        const Camera &camera) {
+                                        const Camera &camera,
+                                        bool build_visualization) {
   StereoInitResult result;
 
   if (frame.left_img.empty() || frame.right_img.empty()) {
@@ -86,7 +87,6 @@ StereoInitResult StereoInitializer::run(const Frame &frame,
   std::vector<double> row_errors;
   std::vector<double> depths;
   std::vector<cv::DMatch> vis_matches;
-  vis_matches.reserve(options_.max_visualized_matches);
 
   int landmark_id = 0;
 
@@ -146,8 +146,8 @@ StereoInitResult StereoInitializer::run(const Frame &frame,
       result.num_depth_gt_80++;
     }
 
-    if (static_cast<int>(vis_matches.size()) <
-        options_.max_visualized_matches) {
+    if (build_visualization &&
+        static_cast<int>(vis_matches.size()) < options_.max_visualized_matches) {
       vis_matches.push_back(m);
     }
   }
@@ -177,46 +177,49 @@ StereoInitResult StereoInitializer::run(const Frame &frame,
         std::accumulate(depths.begin(), depths.end(), 0.0) / depths.size();
   }
 
-  cv::drawMatches(frame.left_img, kps_left, frame.right_img, kps_right,
-                  vis_matches, result.match_vis, cv::Scalar::all(-1),
-                  cv::Scalar::all(-1), std::vector<char>(),
-                  cv::DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS);
+  if (build_visualization) {
+    cv::drawMatches(frame.left_img, kps_left, frame.right_img, kps_right,
+                    vis_matches, result.match_vis, cv::Scalar::all(-1),
+                    cv::Scalar::all(-1), std::vector<char>(),
+                    cv::DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS);
 
-  if (!result.match_vis.empty()) {
-    const std::string line1 =
-        "L kp: " + std::to_string(result.num_left_keypoints) +
-        "  R kp: " + std::to_string(result.num_right_keypoints);
+    if (!result.match_vis.empty()) {
+      const std::string line1 =
+          "L kp: " + std::to_string(result.num_left_keypoints) +
+          "  R kp: " + std::to_string(result.num_right_keypoints);
 
-    const std::string line2 =
-        "raw: " + std::to_string(result.num_raw_matches) +
-        "  dist: " + std::to_string(result.num_distance_filtered) +
-        "  row: " + std::to_string(result.num_row_filtered) +
-        "  disp: " + std::to_string(result.num_disparity_filtered) +
-        "  tri: " + std::to_string(result.num_triangulated);
+      const std::string line2 =
+          "raw: " + std::to_string(result.num_raw_matches) +
+          "  dist: " + std::to_string(result.num_distance_filtered) +
+          "  row: " + std::to_string(result.num_row_filtered) +
+          "  disp: " + std::to_string(result.num_disparity_filtered) +
+          "  tri: " + std::to_string(result.num_triangulated);
 
-    const std::string line3 =
-        "disp min/mean/max: " +
-        cv::format("%.2f / %.2f / %.2f", result.min_disparity,
-                   result.mean_disparity, result.max_disparity);
+      const std::string line3 =
+          "disp min/mean/max: " +
+          cv::format("%.2f / %.2f / %.2f", result.min_disparity,
+                     result.mean_disparity, result.max_disparity);
 
-    const std::string line4 =
-        "row err mean/max: " +
-        cv::format("%.2f / %.2f", result.mean_row_error, result.max_row_error);
+      const std::string line4 =
+          "row err mean/max: " +
+          cv::format("%.2f / %.2f", result.mean_row_error, result.max_row_error);
 
-    const std::string line5 = "depth min/mean/max: " +
-                              cv::format("%.2f / %.2f / %.2f", result.min_depth,
-                                         result.mean_depth, result.max_depth);
+      const std::string line5 =
+          "depth min/mean/max: " +
+          cv::format("%.2f / %.2f / %.2f", result.min_depth, result.mean_depth,
+                     result.max_depth);
 
-    cv::putText(result.match_vis, line1, cv::Point(20, 30),
-                cv::FONT_HERSHEY_SIMPLEX, 0.65, cv::Scalar(0, 255, 0), 2);
-    cv::putText(result.match_vis, line2, cv::Point(20, 60),
-                cv::FONT_HERSHEY_SIMPLEX, 0.65, cv::Scalar(0, 255, 0), 2);
-    cv::putText(result.match_vis, line3, cv::Point(20, 90),
-                cv::FONT_HERSHEY_SIMPLEX, 0.65, cv::Scalar(0, 255, 0), 2);
-    cv::putText(result.match_vis, line4, cv::Point(20, 120),
-                cv::FONT_HERSHEY_SIMPLEX, 0.65, cv::Scalar(0, 255, 0), 2);
-    cv::putText(result.match_vis, line5, cv::Point(20, 150),
-                cv::FONT_HERSHEY_SIMPLEX, 0.65, cv::Scalar(0, 255, 0), 2);
+      cv::putText(result.match_vis, line1, cv::Point(20, 30),
+                  cv::FONT_HERSHEY_SIMPLEX, 0.65, cv::Scalar(0, 255, 0), 2);
+      cv::putText(result.match_vis, line2, cv::Point(20, 60),
+                  cv::FONT_HERSHEY_SIMPLEX, 0.65, cv::Scalar(0, 255, 0), 2);
+      cv::putText(result.match_vis, line3, cv::Point(20, 90),
+                  cv::FONT_HERSHEY_SIMPLEX, 0.65, cv::Scalar(0, 255, 0), 2);
+      cv::putText(result.match_vis, line4, cv::Point(20, 120),
+                  cv::FONT_HERSHEY_SIMPLEX, 0.65, cv::Scalar(0, 255, 0), 2);
+      cv::putText(result.match_vis, line5, cv::Point(20, 150),
+                  cv::FONT_HERSHEY_SIMPLEX, 0.65, cv::Scalar(0, 255, 0), 2);
+    }
   }
 
   return result;

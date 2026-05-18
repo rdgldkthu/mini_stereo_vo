@@ -57,7 +57,8 @@ public:
 
   explicit StereoInitializer(const Options& options);
 
-  StereoInitResult run(const Frame &frame, const Camera &camera);
+  StereoInitResult run(const Frame &frame, const Camera &camera,
+                      bool build_visualization = false);
 
 private:
   cv::Mat makeDetectionMask(const cv::Size& image_size) const;

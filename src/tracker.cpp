@@ -17,7 +17,8 @@ bool Tracker::isInsideImage(const cv::Point2f &pt,
 TrackResult
 Tracker::trackFrameToFrame(const Frame &prev_frame, const Frame &curr_frame,
                            const std::vector<cv::Point2f> &prev_points,
-                           const std::vector<MapPoint> &prev_landmarks) const {
+                           const std::vector<MapPoint> &prev_landmarks,
+                           bool build_visualization) const {
   TrackResult result;
 
   if (prev_frame.left_img.empty() || curr_frame.left_img.empty()) {
@@ -50,18 +51,20 @@ Tracker::trackFrameToFrame(const Frame &prev_frame, const Frame &curr_frame,
                            error_backward, options_.win_size,
                            options_.max_level, options_.term_criteria);
 
-  cv::Mat vis_prev, vis_curr;
-  cv::cvtColor(prev_frame.left_img, vis_prev, cv::COLOR_GRAY2BGR);
-  cv::cvtColor(curr_frame.left_img, vis_curr, cv::COLOR_GRAY2BGR);
-
-  const int canvas_h = std::max(vis_prev.rows, vis_curr.rows);
-  const int canvas_w = vis_prev.cols + vis_curr.cols;
-  cv::Mat canvas(canvas_h, canvas_w, CV_8UC3, cv::Scalar(0, 0, 0));
-  vis_prev.copyTo(canvas(cv::Rect(0, 0, vis_prev.cols, vis_prev.rows)));
-  vis_curr.copyTo(
-      canvas(cv::Rect(vis_prev.cols, 0, vis_curr.cols, vis_curr.rows)));
-
+  cv::Mat canvas;
   int num_visualized = 0;
+
+  if (build_visualization) {
+    cv::Mat vis_prev, vis_curr;
+    cv::cvtColor(prev_frame.left_img, vis_prev, cv::COLOR_GRAY2BGR);
+    cv::cvtColor(curr_frame.left_img, vis_curr, cv::COLOR_GRAY2BGR);
+    const int canvas_h = std::max(vis_prev.rows, vis_curr.rows);
+    const int canvas_w = vis_prev.cols + vis_curr.cols;
+    canvas = cv::Mat(canvas_h, canvas_w, CV_8UC3, cv::Scalar(0, 0, 0));
+    vis_prev.copyTo(canvas(cv::Rect(0, 0, vis_prev.cols, vis_prev.rows)));
+    vis_curr.copyTo(
+        canvas(cv::Rect(vis_prev.cols, 0, vis_curr.cols, vis_curr.rows)));
+  }
 
   for (size_t i = 0; i < prev_points.size(); ++i) {
     if (!status_forward[i] || !status_backward[i]) {
@@ -89,10 +92,11 @@ Tracker::trackFrameToFrame(const Frame &prev_frame, const Frame &curr_frame,
     result.landmark_ids.push_back(prev_landmarks[i].id);
     result.num_valid_correspondences++;
 
-    if (num_visualized < options_.max_visualized_tracks) {
+    if (build_visualization && num_visualized < options_.max_visualized_tracks) {
       const cv::Point2f p0 = prev_points[i];
       const cv::Point2f p1 =
-          curr_points[i] + cv::Point2f(static_cast<float>(vis_prev.cols), 0.0f);
+          curr_points[i] +
+          cv::Point2f(static_cast<float>(prev_frame.left_img.cols), 0.0f);
 
       cv::circle(canvas, p0, 2, cv::Scalar(0, 255, 0), -1);
       cv::circle(canvas, p1, 2, cv::Scalar(0, 255, 0), -1);
@@ -102,20 +106,23 @@ Tracker::trackFrameToFrame(const Frame &prev_frame, const Frame &curr_frame,
     }
   }
 
-  const std::string line1 =
-      "input: " + std::to_string(result.num_input_tracks) +
-      "  flow ok: " + std::to_string(result.num_flow_success) +
-      "  inside: " + std::to_string(result.num_inside_image);
+  if (build_visualization) {
+    const std::string line1 =
+        "input: " + std::to_string(result.num_input_tracks) +
+        "  flow ok: " + std::to_string(result.num_flow_success) +
+        "  inside: " + std::to_string(result.num_inside_image);
 
-  const std::string line2 = "valid 3D-2D correspondences: " +
-                            std::to_string(result.num_valid_correspondences);
+    const std::string line2 = "valid 3D-2D correspondences: " +
+                              std::to_string(result.num_valid_correspondences);
 
-  cv::putText(canvas, line1, cv::Point(20, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7,
-              cv::Scalar(0, 255, 0), 2);
-  cv::putText(canvas, line2, cv::Point(20, 60), cv::FONT_HERSHEY_SIMPLEX, 0.7,
-              cv::Scalar(0, 255, 0), 2);
+    cv::putText(canvas, line1, cv::Point(20, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7,
+                cv::Scalar(0, 255, 0), 2);
+    cv::putText(canvas, line2, cv::Point(20, 60), cv::FONT_HERSHEY_SIMPLEX, 0.7,
+                cv::Scalar(0, 255, 0), 2);
 
-  result.track_vis = canvas;
+    result.track_vis = canvas;
+  }
+
   return result;
 }
 
