@@ -104,14 +104,13 @@ transformLandmarksToWorld(const std::vector<svo::MapPoint> &local_landmarks,
 
 void gatherPnPInliers(const std::vector<Eigen::Vector3d> &object_points,
                       const std::vector<cv::Point2f> &image_points,
-                      const cv::Mat &inlier_indices,
+                      const std::vector<int> &inlier_indices,
                       std::vector<Eigen::Vector3d> &inlier_object_points,
                       std::vector<cv::Point2f> &inlier_image_points) {
   inlier_object_points.clear();
   inlier_image_points.clear();
 
-  for (int i = 0; i < inlier_indices.rows; ++i) {
-    const int idx = inlier_indices.at<int>(i, 0);
+  for (const int idx : inlier_indices) {
     if (idx < 0 || idx >= static_cast<int>(object_points.size())) {
       continue;
     }

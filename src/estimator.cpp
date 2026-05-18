@@ -248,9 +248,10 @@ PoseEstimateResult Estimator::estimatePosePnPRansac(
   }
 
   result.success = true;
-  result.rvec = rvec;
-  result.tvec = tvec;
-  result.inlier_indices = inliers;
+  result.inlier_indices.reserve(inliers.rows);
+  for (int i = 0; i < inliers.rows; ++i) {
+    result.inlier_indices.push_back(inliers.at<int>(i, 0));
+  }
   result.rotation = R;
   result.translation = t;
   result.num_inliers = inliers.rows;
@@ -354,16 +355,6 @@ PoseEstimateResult Estimator::refinePosePoseOnly(
   result.num_inliers = static_cast<int>(object_points.size());
   result.reprojection_rmse_after =
       computeReprojectionRmse(object_points, image_points, camera, R_cw, t_cw);
-
-  cv::Mat R_cv =
-      (cv::Mat_<double>(3, 3) << R_cw(0, 0), R_cw(0, 1), R_cw(0, 2), R_cw(1, 0),
-       R_cw(1, 1), R_cw(1, 2), R_cw(2, 0), R_cw(2, 1), R_cw(2, 2));
-  cv::Rodrigues(R_cv, result.rvec);
-
-  result.tvec = cv::Mat::zeros(3, 1, CV_64F);
-  result.tvec.at<double>(0, 0) = t_cw(0);
-  result.tvec.at<double>(1, 0) = t_cw(1);
-  result.tvec.at<double>(2, 0) = t_cw(2);
 
   return result;
 }

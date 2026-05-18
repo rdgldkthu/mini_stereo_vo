@@ -16,9 +16,7 @@ namespace svo {
 struct PoseEstimateResult {
   bool success = false;
 
-  cv::Mat rvec;
-  cv::Mat tvec;
-  cv::Mat inlier_indices;
+  std::vector<int> inlier_indices;
 
   Eigen::Matrix3d rotation = Eigen::Matrix3d::Identity();
   Eigen::Vector3d translation = Eigen::Vector3d::Zero();
