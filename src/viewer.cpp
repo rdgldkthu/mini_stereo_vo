@@ -81,7 +81,7 @@ cv::Mat Viewer::drawTrajectoryView(const std::vector<Eigen::Matrix4d> &poses,
     const int gt_end =
         std::min(frame_id, static_cast<int>(gt_poses.size()) - 1);
 
-    for (int i = 1; i < gt_end; ++i) {
+    for (int i = 1; i <= gt_end; ++i) {
       const Eigen::Vector3d t0 = gt_poses[i - 1].block<3, 1>(0, 3);
       const Eigen::Vector3d t1 = gt_poses[i].block<3, 1>(0, 3);
 
