@@ -18,7 +18,8 @@ TrackResult
 Tracker::trackFrameToFrame(const Frame &prev_frame, const Frame &curr_frame,
                            const std::vector<cv::Point2f> &prev_points,
                            const std::vector<MapPoint> &prev_landmarks,
-                           bool build_visualization) const {
+                           bool build_visualization,
+                           cv::Point2f motion_hint) const {
   TrackResult result;
 
   if (prev_frame.left_img.empty() || curr_frame.left_img.empty()) {
@@ -33,7 +34,19 @@ Tracker::trackFrameToFrame(const Frame &prev_frame, const Frame &curr_frame,
 
   result.num_input_tracks = static_cast<int>(prev_points.size());
 
-  std::vector<cv::Point2f> curr_points;
+  const cv::Size img_size = curr_frame.left_img.size();
+  std::vector<cv::Point2f> curr_points(prev_points.size());
+  for (size_t i = 0; i < prev_points.size(); ++i) {
+    const cv::Point2f predicted = prev_points[i] + motion_hint;
+    // Fall back to the original position if the hint places the feature outside
+    // the image — LK would mark it as failed, losing the track unnecessarily.
+    if (predicted.x >= 0 && predicted.y >= 0 &&
+        predicted.x < img_size.width && predicted.y < img_size.height) {
+      curr_points[i] = predicted;
+    } else {
+      curr_points[i] = prev_points[i];
+    }
+  }
   std::vector<uchar> status_forward;
   std::vector<float> error_forward;
 

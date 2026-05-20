@@ -225,8 +225,8 @@ int main(int argc, char **argv) {
   svo::StereoInitializer initializer(init_options);
 
   svo::Tracker::Options tracker_options;
-  tracker_options.win_size = cv::Size(21, 21);
-  tracker_options.max_level = 3;
+  tracker_options.win_size = cv::Size(25, 25);
+  tracker_options.max_level = 4;
   tracker_options.max_bidirectional_error_px = 1.5;
   tracker_options.image_border_px = 10;
   tracker_options.max_visualized_tracks = 150;
@@ -254,7 +254,7 @@ int main(int argc, char **argv) {
 
   svo::Frontend::Options frontend_options;
   frontend_options.keyframe_translation_threshold_m = 1.5;
-  frontend_options.keyframe_rotation_threshold_deg = 12.0;
+  frontend_options.keyframe_rotation_threshold_deg = 8.0;
   frontend_options.keyframe_min_tracked_points = 60;
   frontend_options.keyframe_min_frame_gap = 5;
   frontend_options.keyframe_low_track_translation_threshold_m = 0.5;
@@ -340,6 +340,7 @@ int main(int argc, char **argv) {
   // -------------------------------------------------------------------------
   const auto loop_start = std::chrono::steady_clock::now();
   int frames_processed = 0;
+  cv::Point2f motion_hint{0.0f, 0.0f};
 
   for (int frame_id = 1; frame_id < dataset.numFrames(); ++frame_id) {
     svo::Frame curr_frame;
@@ -356,7 +357,21 @@ int main(int argc, char **argv) {
 
     const svo::TrackResult track_result = tracker.trackFrameToFrame(
         frontend.previousFrame(), curr_frame, frontend.activePoints(),
-        frontend.activeLandmarks(), save_debug);
+        frontend.activeLandmarks(), save_debug, motion_hint);
+
+    if (!track_result.prev_points.empty()) {
+      std::vector<float> du, dv;
+      du.reserve(track_result.prev_points.size());
+      dv.reserve(track_result.prev_points.size());
+      for (size_t i = 0; i < track_result.prev_points.size(); ++i) {
+        du.push_back(track_result.curr_points[i].x - track_result.prev_points[i].x);
+        dv.push_back(track_result.curr_points[i].y - track_result.prev_points[i].y);
+      }
+      const size_t mid = du.size() / 2;
+      std::nth_element(du.begin(), du.begin() + mid, du.end());
+      std::nth_element(dv.begin(), dv.begin() + mid, dv.end());
+      motion_hint = {du[mid], dv[mid]};
+    }
 
     svo::FrontendFrameStats frame_stats;
     Eigen::Matrix4d candidate_pose = frontend.currentPose();
@@ -442,6 +457,7 @@ int main(int argc, char **argv) {
 
         frontend.noteReinitialized(frame_id);
         frame_stats.reinitialized = true;
+        motion_hint = {0.0f, 0.0f};
       } else {
         frontend.setActiveTracks(track_result.curr_points, track_result.tracked_landmarks);
       }
