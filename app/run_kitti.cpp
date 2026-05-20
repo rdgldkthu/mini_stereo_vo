@@ -503,8 +503,8 @@ int main(int argc, char **argv) {
 
           svo::LocalBAResult ba_result = estimator.runLocalBundleAdjustment(map.mutableActiveKeyframes(), map.mutableActiveLandmarks(), camera);
 
+          frame_stats.ran_local_ba = true;
           if (ba_result.success && ba_result.rmse_after > 0.0 && ba_result.rmse_after <= ba_result.rmse_before) {
-            frame_stats.ran_local_ba = true;
             frame_stats.local_ba_accepted = true;
             frame_stats.ba_rmse_before = ba_result.rmse_before;
             frame_stats.ba_rmse_after = ba_result.rmse_after;
