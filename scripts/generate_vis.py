@@ -148,7 +148,7 @@ def main():
     traj_path = Path(args.traj) if args.traj else repo_root / "results" / "traj" / f"{seq}.txt"
     gt_path = Path(args.kitti) / "poses" / f"{seq}.txt"
     debug_dir = repo_root / "results" / "debug"
-    stats_csv = debug_dir / f"{seq}_vo_stats.csv"
+    stats_csv = debug_dir / f"{traj_path.stem}_stats.csv"
     assets_dir = repo_root / "assets"
     assets_dir.mkdir(exist_ok=True)
 

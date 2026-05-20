@@ -46,7 +46,14 @@ Each stage is a self-contained module (`include/svo/`, `src/`). The main loop in
 |:---:|:---:|
 | ![Tracking](assets/tracking.png) | ![Inlier ratio](assets/inlier_ratio.png) |
 
-Runs through all 1 117 frames of KITTI seq 05. Inlier ratio stays above 0.9 for the majority of the sequence. Trajectory follows ground truth with expected long-range drift — pure VO without loop closure or global optimization.
+Runs through all 2 761 frames of KITTI seq 05. Median inlier ratio 0.91. Trajectory follows ground truth with expected long-range drift — pure VO without loop closure or global optimization.
+
+**KITTI seq 05 — evo metrics (best run)**
+
+| Metric | RMSE | Mean | Median |
+|:---|---:|---:|---:|
+| APE (m) | 6.30 | 5.64 | 5.26 |
+| RPE (m/frame) | 0.111 | 0.053 | 0.030 |
 
 ---
 
@@ -64,14 +71,14 @@ bash scripts/bootstrap_ubuntu2404.sh
 # build
 cmake -S . -B build -G Ninja && cmake --build build -j
 
-# run (KITTI seq 05)
-./build/run_kitti data/kitti 05 results/traj/05_vo.txt
+# run (KITTI seq 05) — trajectory written to results/traj/05_<YYMMDD>[_<keyword>].txt
+./build/run_kitti data/kitti 05 [pose_keyword] [--save-debug]
 
 # evaluate APE / RPE — outputs plots to results/tables/05/
-scripts/eval_kitti.sh 05 results/traj/05_vo.txt
+scripts/eval_kitti.sh 05 results/traj/<output>.txt
 
 # regenerate README images
-source .venv/bin/activate && python3 scripts/generate_vis.py --seq 05 --traj results/traj/05_vo.txt
+source .venv/bin/activate && python3 scripts/generate_vis.py --seq 05 --traj results/traj/<output>.txt
 ```
 
 ---
