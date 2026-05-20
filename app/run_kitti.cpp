@@ -222,6 +222,9 @@ int main(int argc, char **argv) {
   init_options.max_depth_m = 80.0;
   init_options.image_border_px = 10;
   init_options.max_visualized_matches = 100;
+  init_options.grid_rows = 4;
+  init_options.grid_cols = 8;
+  init_options.max_per_cell = 10;
   svo::StereoInitializer initializer(init_options);
 
   svo::Tracker::Options tracker_options;

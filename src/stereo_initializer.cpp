@@ -37,6 +37,65 @@ cv::Mat StereoInitializer::makeDetectionMask(const cv::Size& image_size) const {
   return mask;
 }
 
+void StereoInitializer::bucketFeatures(StereoInitResult& result,
+                                       const cv::Size& image_size) const {
+  const int rows = options_.grid_rows;
+  const int cols = options_.grid_cols;
+  const int per_cell = options_.max_per_cell;
+
+  if (rows <= 0 || cols <= 0 || per_cell <= 0 || result.features.empty()) {
+    return;
+  }
+
+  const float cell_w = static_cast<float>(image_size.width) / cols;
+  const float cell_h = static_cast<float>(image_size.height) / rows;
+
+  std::vector<int> kept;
+  kept.reserve(rows * cols * per_cell);
+
+  for (int r = 0; r < rows; ++r) {
+    for (int c = 0; c < cols; ++c) {
+      const float x_min = c * cell_w;
+      const float x_max = (c + 1) * cell_w;
+      const float y_min = r * cell_h;
+      const float y_max = (r + 1) * cell_h;
+
+      std::vector<int> cell_idx;
+      for (int i = 0; i < static_cast<int>(result.features.size()); ++i) {
+        const float x = result.features[i].kp_left.pt.x;
+        const float y = result.features[i].kp_left.pt.y;
+        if (x >= x_min && x < x_max && y >= y_min && y < y_max) {
+          cell_idx.push_back(i);
+        }
+      }
+
+      std::sort(cell_idx.begin(), cell_idx.end(), [&result](int a, int b) {
+        return result.features[a].kp_left.response >
+               result.features[b].kp_left.response;
+      });
+
+      const int take = std::min(per_cell, static_cast<int>(cell_idx.size()));
+      for (int i = 0; i < take; ++i) {
+        kept.push_back(cell_idx[i]);
+      }
+    }
+  }
+
+  std::vector<Feature> new_features;
+  std::vector<MapPoint> new_landmarks;
+  new_features.reserve(kept.size());
+  new_landmarks.reserve(kept.size());
+
+  for (const int idx : kept) {
+    new_features.push_back(result.features[idx]);
+    new_landmarks.push_back(result.landmarks[idx]);
+  }
+
+  result.features = std::move(new_features);
+  result.landmarks = std::move(new_landmarks);
+  result.num_triangulated = static_cast<int>(result.features.size());
+}
+
 StereoInitResult StereoInitializer::run(const Frame &frame,
                                         const Camera &camera,
                                         bool build_visualization) {
@@ -151,6 +210,8 @@ StereoInitResult StereoInitializer::run(const Frame &frame,
       vis_matches.push_back(m);
     }
   }
+
+  bucketFeatures(result, frame.left_img.size());
 
   if (!disparities.empty()) {
     result.min_disparity =

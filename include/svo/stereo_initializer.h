@@ -53,6 +53,12 @@ public:
     double max_depth_m = 80.0;
     int image_border_px = 10;
     int max_visualized_matches = 100;
+    // Grid bucketing: image divided into grid_rows x grid_cols cells;
+    // only the top max_per_cell highest-response keypoints per cell are kept.
+    // Set max_per_cell <= 0 to disable.
+    int grid_rows = 4;
+    int grid_cols = 8;
+    int max_per_cell = 10;
   };
 
   explicit StereoInitializer(const Options& options);
@@ -62,6 +68,8 @@ public:
 
 private:
   cv::Mat makeDetectionMask(const cv::Size& image_size) const;
+  void bucketFeatures(StereoInitResult& result,
+                      const cv::Size& image_size) const;
 
 private:
   Options options_;
