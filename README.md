@@ -1,6 +1,8 @@
 # mini_stereo_vo
 
-![Trajectory](assets/trajectory.png)
+![Tracking overlay](assets/tracking.gif)
+
+<img src="assets/trajectory.png" width="480" alt="Trajectory">
 
 Stereo visual odometry built from scratch in C++. Tracks a moving camera through the KITTI benchmark — no SLAM library, no shortcuts.
 
@@ -79,6 +81,9 @@ scripts/eval_kitti.sh 05 results/traj/<output>.txt
 
 # regenerate README images
 source .venv/bin/activate && python3 scripts/generate_vis.py --seq 05 --traj results/traj/<output>.txt
+
+# regenerate tracking GIF (requires a prior --save-debug run)
+source .venv/bin/activate && python3 scripts/make_tracking_gif.py --seq 05
 ```
 
 ---
@@ -98,6 +103,7 @@ mini_stereo_vo/
 │   └── viewer.cpp
 ├── scripts/
 │   ├── generate_vis.py        # generate README assets
+│   ├── make_tracking_gif.py   # assemble debug frames into tracking GIF
 │   ├── eval_kitti.sh          # APE / RPE evaluation via evo
 │   └── bootstrap_ubuntu2404.sh
 ├── assets/                    # images used in this README
