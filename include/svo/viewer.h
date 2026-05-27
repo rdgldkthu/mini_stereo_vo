@@ -6,23 +6,9 @@
 #include <Eigen/Core>
 #include <opencv2/opencv.hpp>
 
+#include "svo/viewer_status.h"
+
 namespace svo {
-
-struct ViewerStatus {
-  int frame_id = -1;
-  int num_active_points = 0;
-  int num_correspondences = 0;
-  int num_inliers = 0;
-
-  bool pose_accepted = false;
-  bool reinitialized = false;
-  bool inserted_keyframe = false;
-  bool ran_local_ba = false;
-
-  double delta_t = 0.0;
-  double rmse_before = 0.0;
-  double rmse_after = 0.0;
-};
 
 class Viewer {
 public:

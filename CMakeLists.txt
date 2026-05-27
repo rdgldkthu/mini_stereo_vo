@@ -13,6 +13,13 @@ endif()
 find_package(Eigen3 REQUIRED)
 find_package(OpenCV REQUIRED COMPONENTS core imgcodecs imgproc highgui features2d video calib3d)
 
+include(FetchContent)
+FetchContent_Declare(
+  rerun_sdk
+  URL https://github.com/rerun-io/rerun/releases/download/0.22.1/rerun_cpp_sdk.zip
+)
+FetchContent_MakeAvailable(rerun_sdk)
+
 add_library(svo_core
   src/camera.cpp
   src/dataset_kitti.cpp
@@ -23,6 +30,7 @@ add_library(svo_core
   src/stereo_initializer.cpp
   src/tracker.cpp
   src/viewer.cpp
+  src/rerun_viewer.cpp
 )
 
 target_include_directories(svo_core
@@ -30,7 +38,7 @@ target_include_directories(svo_core
 )
 
 target_link_libraries(svo_core
-  PUBLIC Eigen3::Eigen ${OpenCV_LIBS}
+  PUBLIC Eigen3::Eigen ${OpenCV_LIBS} rerun_sdk
 )
 
 target_compile_options(svo_core

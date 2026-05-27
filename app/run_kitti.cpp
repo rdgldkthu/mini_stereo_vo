@@ -23,6 +23,7 @@
 #include "svo/pose_writer.h"
 #include "svo/stereo_initializer.h"
 #include "svo/tracker.h"
+#include "svo/rerun_viewer.h"
 #include "svo/viewer.h"
 
 namespace fs = std::filesystem;
@@ -282,6 +283,11 @@ int main(int argc, char **argv) {
   viewer_options.trajectory_size = 600;
   viewer_options.trajectory_scale = 0.5;
   svo::Viewer viewer(viewer_options);
+
+  svo::RerunViewer::Options rerun_options;
+  rerun_options.app_id = "stereo_slam";
+  rerun_options.spawn_viewer = true;
+  svo::RerunViewer rerun_viewer(rerun_options);
 
   // -------------------------------------------------------------------------
   // Initial stereo bootstrapping
@@ -622,11 +628,15 @@ int main(int argc, char **argv) {
     viewer_status.rmse_before = frame_stats.rmse_before;
     viewer_status.rmse_after = frame_stats.rmse_after;
 
-    if (!viewer.update(curr_frame.left_img, frontend.activePoints(), frontend.poses(), gt_poses,
-                       viewer_status)) {
-      std::cout << "Viewer requested exit.\n";
-      break;
-    }
+    rerun_viewer.update(frame_id, curr_frame.left_img, frontend.activePoints(),
+                        frontend.poses(), gt_poses, viewer_status);
+
+    // Fallback: OpenCV 2D viewer (uncomment to use instead of Rerun)
+    // if (!viewer.update(curr_frame.left_img, frontend.activePoints(), frontend.poses(), gt_poses,
+    //                    viewer_status)) {
+    //   std::cout << "Viewer requested exit.\n";
+    //   break;
+    // }
 
     ++frames_processed;
   }
