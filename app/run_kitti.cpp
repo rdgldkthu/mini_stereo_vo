@@ -158,7 +158,7 @@ std::vector<Eigen::Matrix4d> loadKittiPoses(const fs::path &pose_path) {
 int main(int argc, char **argv) {
   if (argc < 3) {
     std::cerr << "Usage: " << argv[0]
-              << " <kitti_root> <sequence> [pose_keyword] [--save-debug]\n";
+              << " <kitti_root> <sequence> [pose_keyword] [--save-debug] [--no-viewer]\n";
     std::cerr << "Example: " << argv[0] << " data/kitti 05 vo\n";
     return 1;
   }
@@ -167,10 +167,13 @@ int main(int argc, char **argv) {
   const std::string sequence = argv[2];
 
   bool save_debug = false;
+  bool no_viewer = false;
   std::string pose_keyword;
   for (int i = 3; i < argc; ++i) {
     if (std::string(argv[i]) == "--save-debug") {
       save_debug = true;
+    } else if (std::string(argv[i]) == "--no-viewer") {
+      no_viewer = true;
     } else {
       pose_keyword = argv[i];
     }
@@ -286,7 +289,7 @@ int main(int argc, char **argv) {
 
   svo::RerunViewer::Options rerun_options;
   rerun_options.app_id = "stereo_slam";
-  rerun_options.spawn_viewer = true;
+  rerun_options.spawn_viewer = !no_viewer;
   svo::RerunViewer rerun_viewer(rerun_options);
 
   // -------------------------------------------------------------------------
@@ -628,8 +631,9 @@ int main(int argc, char **argv) {
     viewer_status.rmse_before = frame_stats.rmse_before;
     viewer_status.rmse_after = frame_stats.rmse_after;
 
-    rerun_viewer.update(frame_id, curr_frame.left_img, frontend.activePoints(),
-                        frontend.poses(), gt_poses, viewer_status);
+    if (!no_viewer)
+      rerun_viewer.update(frame_id, curr_frame.left_img, frontend.activePoints(),
+                          frontend.poses(), gt_poses, viewer_status);
 
     // Fallback: OpenCV 2D viewer (uncomment to use instead of Rerun)
     // if (!viewer.update(curr_frame.left_img, frontend.activePoints(), frontend.poses(), gt_poses,
