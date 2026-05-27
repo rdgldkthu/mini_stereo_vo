@@ -218,7 +218,7 @@ int main(int argc, char **argv) {
   // Modules
   // -------------------------------------------------------------------------
   svo::StereoInitializer::Options init_options;
-  init_options.max_features = 1500;
+  init_options.max_features = 1000;
   init_options.hamming_threshold = 40;
   init_options.row_tolerance_px = 2.0;
   init_options.min_disparity_px = 3.0;

@@ -113,9 +113,9 @@ def plot_inlier_ratio(stats_csv, out_path):
     print(f"  wrote {out_path}")
 
 
-def copy_tracking_frame(debug_dir, seq, out_path):
+def copy_tracking_frame(debug_dir, traj_stem, out_path):
     """Pick a mid-sequence tracking frame and copy it."""
-    candidates = sorted(Path(debug_dir).glob(f"{seq}_track_*.png"))
+    candidates = sorted(Path(debug_dir).glob(f"{traj_stem}_track_*.png"))
     if not candidates:
         print(f"  warning: no tracking frames found in {debug_dir}", file=sys.stderr)
         return
@@ -125,8 +125,8 @@ def copy_tracking_frame(debug_dir, seq, out_path):
     print(f"  wrote {out_path}  (from {candidates[idx].name})")
 
 
-def copy_init_matches(debug_dir, seq, out_path):
-    src = Path(debug_dir) / f"{seq}_init_matches.png"
+def copy_init_matches(debug_dir, traj_stem, out_path):
+    src = Path(debug_dir) / f"{traj_stem}_init_matches.png"
     if not src.exists():
         print(f"  warning: {src} not found", file=sys.stderr)
         return
@@ -174,8 +174,8 @@ def main():
     else:
         print(f"  skipping inlier_ratio.png — {stats_csv} not found")
 
-    copy_tracking_frame(debug_dir, seq, assets_dir / "tracking.png")
-    copy_init_matches(debug_dir, seq, assets_dir / "init_matches.png")
+    copy_tracking_frame(debug_dir, traj_path.stem, assets_dir / "tracking.png")
+    copy_init_matches(debug_dir, traj_path.stem, assets_dir / "init_matches.png")
 
     print("Done. Assets written to assets/")
 

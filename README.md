@@ -2,7 +2,7 @@
 
 ![Tracking overlay](assets/tracking.gif)
 
-<img src="assets/trajectory.png" width="480" alt="Trajectory">
+![Trajectory](assets/trajectory.png)
 
 Stereo visual odometry built from scratch in C++. Tracks a moving camera through the KITTI benchmark — no SLAM library, no shortcuts.
 
@@ -50,12 +50,14 @@ Each stage is a self-contained module (`include/svo/`, `src/`). The main loop in
 
 Runs through all 2 761 frames of KITTI seq 05. Median inlier ratio 0.91. Trajectory follows ground truth with expected long-range drift — pure VO without loop closure or global optimization.
 
-**KITTI seq 05 — evo metrics (best run)**
+**KITTI seq 05 — evo metrics**
 
 | Metric | RMSE | Mean | Median |
 |:---|---:|---:|---:|
-| APE (m) | 6.30 | 5.64 | 5.26 |
-| RPE (m/frame) | 0.111 | 0.053 | 0.030 |
+| APE (m) | 8.36 | 7.48 | 6.78 |
+| RPE (m/frame) | 0.102 | 0.053 | 0.031 |
+
+**Runtime** — 13.6 ms/frame avg (Release build, `OPENCV_TRACE=0`, KITTI seq 05 on CPU)
 
 ---
 
@@ -71,10 +73,10 @@ bash scripts/bootstrap_ubuntu2404.sh
 
 ```bash
 # build
-cmake -S . -B build -G Ninja && cmake --build build -j
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
 
 # run (KITTI seq 05) — trajectory written to results/traj/05_<YYMMDD>[_<keyword>].txt
-./build/run_kitti data/kitti 05 [pose_keyword] [--save-debug]
+OPENCV_TRACE=0 ./build/run_kitti data/kitti 05 [pose_keyword] [--save-debug]
 
 # evaluate APE / RPE — outputs plots to results/tables/05/
 scripts/eval_kitti.sh 05 results/traj/<output>.txt
