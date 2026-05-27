@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -287,10 +288,12 @@ int main(int argc, char **argv) {
   viewer_options.trajectory_scale = 0.5;
   svo::Viewer viewer(viewer_options);
 
-  svo::RerunViewer::Options rerun_options;
-  rerun_options.app_id = "stereo_slam";
-  rerun_options.spawn_viewer = !no_viewer;
-  svo::RerunViewer rerun_viewer(rerun_options);
+  std::optional<svo::RerunViewer> rerun_viewer;
+  if (!no_viewer) {
+    svo::RerunViewer::Options rerun_options;
+    rerun_options.app_id = "stereo_slam";
+    rerun_viewer.emplace(rerun_options);
+  }
 
   // -------------------------------------------------------------------------
   // Initial stereo bootstrapping
@@ -631,9 +634,9 @@ int main(int argc, char **argv) {
     viewer_status.rmse_before = frame_stats.rmse_before;
     viewer_status.rmse_after = frame_stats.rmse_after;
 
-    if (!no_viewer)
-      rerun_viewer.update(frame_id, curr_frame.left_img, frontend.activePoints(),
-                          frontend.poses(), gt_poses, viewer_status);
+    if (rerun_viewer)
+      rerun_viewer->update(frame_id, curr_frame.left_img, frontend.activePoints(),
+                           frontend.poses(), gt_poses, viewer_status);
 
     // Fallback: OpenCV 2D viewer (uncomment to use instead of Rerun)
     // if (!viewer.update(curr_frame.left_img, frontend.activePoints(), frontend.poses(), gt_poses,
