@@ -238,7 +238,7 @@ int main(int argc, char **argv) {
   svo::Estimator::Options estimator_options;
   estimator_options.use_extrinsic_guess = false;
   estimator_options.iterations_count = 100;
-  estimator_options.reprojection_error_px = 4.0f;
+  estimator_options.reprojection_error_px = 3.0f;
   estimator_options.confidence = 0.99;
   estimator_options.min_pnp_points = 6;
   estimator_options.pose_refine_iterations = 10;
