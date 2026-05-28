@@ -11,7 +11,7 @@ public:
   bool loadFromKittiCalib(const std::string& calib_path);
 
   Eigen::Vector3d pixel2Camera(double u, double v, double depth) const;
-  bool triangulateRectified(double ul, double vl, double rt,
+  bool triangulateRectified(double ul, double vl, double ur,
                             Eigen::Vector3d &p_c) const;
 
   void print() const;

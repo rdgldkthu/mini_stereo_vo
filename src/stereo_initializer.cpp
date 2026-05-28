@@ -175,6 +175,14 @@ StereoInitResult StereoInitializer::run(const Frame &frame,
     if (!camera.triangulateRectified(ul, vl, ur, p_c)) {
       continue;
     }
+
+    if (p_c.z() > 50.0) {
+      result.num_depth_gt_50++;
+    }
+    if (p_c.z() > 80.0) {
+      result.num_depth_gt_80++;
+    }
+
     if (p_c.z() > options_.max_depth_m) {
       continue;
     }
@@ -197,13 +205,6 @@ StereoInitResult StereoInitializer::run(const Frame &frame,
     row_errors.push_back(row_error);
     depths.push_back(p_c.z());
     result.num_triangulated++;
-
-    if (p_c.z() > 50.0) {
-      result.num_depth_gt_50++;
-    }
-    if (p_c.z() > 80.0) {
-      result.num_depth_gt_80++;
-    }
 
     if (build_visualization &&
         static_cast<int>(vis_matches.size()) < options_.max_visualized_matches) {
