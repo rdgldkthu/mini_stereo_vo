@@ -32,11 +32,22 @@ struct TrackResult {
 class Tracker {
 public:
   struct Options {
+    // LK optical-flow patch size. Larger windows handle faster inter-frame
+    // motion but increase compute cost; 25×25 comfortably covers KITTI vehicle
+    // speeds (~1–3 px/frame at lower pyramid levels).
     cv::Size win_size = cv::Size(21, 21);
+    // Number of pyramid levels (0 = full-resolution only). Each additional level
+    // doubles the effective capture range; 4 levels handle motion up to ~16 px
+    // at the finest scale before the coarsest level takes over.
     int max_level = 3;
     cv::TermCriteria term_criteria = cv::TermCriteria(
         cv::TermCriteria::COUNT + cv::TermCriteria::EPS, 30, 0.01);
+    // Forward-backward consistency check: a track is kept only when re-tracking
+    // the predicted point back to the previous frame lands within this many
+    // pixels of the original. 1.5 px ≈ 1σ for well-converged LK flow.
     double max_bidirectional_error_px = 1.5;
+    // Tracks whose current or predicted position is within this many pixels of
+    // the image boundary are dropped (LK unreliable near edges).
     int image_border_px = 10;
     int max_visualized_tracks = 150;
   };

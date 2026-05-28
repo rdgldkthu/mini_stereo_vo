@@ -13,9 +13,17 @@ namespace svo {
 class Map {
 public:
   struct Options {
+    // Sliding-window size: oldest keyframe is evicted once this count is exceeded.
     int max_active_keyframes = 5;
+    // Hard cap on the active landmark set; excess landmarks are pruned by
+    // descending tracked_frames then ascending missed_times.
     int max_active_landmarks = 2000;
+    // A landmark with fewer than this many keyframe_observations is considered
+    // unestablished and is pruned when it also has missed_times > 2.
+    // Requires a landmark to survive at least one full keyframe interval.
     int min_observed_times = 2;
+    // Evict a landmark after it has been missed for this many consecutive frames.
+    // At 10 Hz, 8 frames = 0.8 s — long enough to ride out brief occlusions.
     int max_missed_times = 8;
   };
 

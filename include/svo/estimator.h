@@ -29,15 +29,30 @@ struct PoseEstimateResult {
 class Estimator {
 public:
   struct Options {
+    // Whether solvePnPRansac should use the supplied initial rotation/translation
+    // as an extrinsic guess (passed through to OpenCV's useExtrinsicGuess flag).
     bool use_extrinsic_guess = false;
+    // Maximum RANSAC iterations. With 99 % confidence and a 60 % inlier rate,
+    // the minimum-sample-set size of 4 needs ~16 iterations; 100 is conservative.
     int iterations_count = 100;
+    // RANSAC inlier threshold: a 3D–2D correspondence is an inlier when its
+    // reprojection error is below this many pixels. KITTI calibration gives
+    // ~0.5 px reprojection on a well-matched point; 3 px is a generous bound
+    // that tolerates sub-pixel LK drift without admitting large outliers.
     float reprojection_error_px = 4.0f;
+    // RANSAC confidence (probability that at least one sample is outlier-free).
     double confidence = 0.99;
+    // Minimum number of 3D–2D correspondences required to attempt PnP.
+    // P3P needs 4 non-degenerate points; 6 provides a safety margin.
     int min_pnp_points = 6;
 
+    // Gauss-Newton pose-only refinement parameters (run after RANSAC on inliers).
     int pose_refine_iterations = 10;
     double pose_refine_epsilon = 1e-6;
+    // Huber loss transition (pixels): residuals below this are L2, above are L1.
     double pose_refine_huber_delta = 5.0;
+    // Skip refinement when fewer than this many inliers survive RANSAC
+    // (too few points make the Gauss-Newton system poorly conditioned).
     int min_refine_inliers = 10;
   };
 

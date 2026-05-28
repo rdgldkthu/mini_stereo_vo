@@ -40,19 +40,49 @@ struct ProcessFrameResult {
 class Frontend {
 public:
   struct Options {
+    // --- Keyframe insertion triggers ---
+    // New keyframe when camera has moved this far since the last keyframe.
+    // At 10 Hz KITTI frame rate, 1.5 m ≈ 54 km/h → triggers every 1–2 frames
+    // at highway speed and every few frames in urban driving.
     double keyframe_translation_threshold_m = 1.0;
+    // New keyframe when the camera has rotated this much since the last keyframe.
     double keyframe_rotation_threshold_deg = 10.0;
+    // Also trigger a keyframe when tracked points drop below this count
+    // (independently of translation/rotation), provided the camera has moved at
+    // least keyframe_low_track_translation_threshold_m since the last keyframe.
     int keyframe_min_tracked_points = 100;
+    // Minimum frame gap between successive keyframes to prevent thrashing when
+    // the translation and point-count triggers fire on every frame.
     int keyframe_min_frame_gap = 15;
+    // Companion to keyframe_min_tracked_points: the low-track trigger is
+    // suppressed below this translation to avoid keyframes on static scenes.
     double keyframe_low_track_translation_threshold_m = 0.5;
 
+    // --- Pose acceptance ---
+    // Bootstrap and reinit require at least this many triangulated landmarks.
     int min_initial_landmarks = 20;
+    // Minimum PnP inlier count to accept a pose estimate.
     int min_pose_inliers = 15;
+    // Minimum fraction of correspondences that must be PnP inliers.
+    // 10 % is intentionally permissive: with 200 tracks, 20 inliers still gives
+    // a well-constrained pose; tighter values cause spurious rejections on turns.
     double min_pose_inlier_ratio = 0.10;
+    // Reject poses that imply more than this much translation in one frame.
+    // Derived from dataset frame rate × plausible max speed:
+    //   KITTI 10 Hz, ~130 km/h ≈ 36 m/s → 3.6 m/frame theoretical max.
+    //   2.0 m ≈ 72 km/h — a conservative bound that rejects tracking failures
+    //   while accepting legitimate highway motion.
     double max_frame_translation_m = 2.0;
 
+    // --- Reinitialization policy ---
+    // Don't reinitialize more often than once per this many frames (prevents
+    // thrashing when tracking is persistently poor; 10 frames = 1 s at 10 Hz).
     int min_reinit_frame_gap = 10;
+    // Fewer than this many active tracks is considered "weak" and triggers
+    // reinitialization (subject to the frame-gap guard above).
     int weak_track_threshold = 80;
+    // Trigger emergency reinitialization after this many consecutive rejected
+    // poses even if the frame-gap guard has not expired.
     int emergency_rejected_poses_count = 2;
   };
 
