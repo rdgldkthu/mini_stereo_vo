@@ -602,7 +602,8 @@ int main(int argc, char **argv) {
               << " | reinit: " << frame_stats.reinitialized
               << " | keyframe: " << frame_stats.inserted_keyframe << "\n";
 
-    if (frontend.activePoints().size() < 20) {
+    if (static_cast<int>(frontend.activePoints().size()) <
+        estimator_options.min_pnp_points) {
       std::cout << "Tracking dropped below threshold at frame " << frame_id
                 << ". Stopping early.\n";
       break;
