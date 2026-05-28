@@ -36,7 +36,7 @@ Stereo visual odometry built from scratch in C++. Tracks a moving camera through
 
 Each stage is a self-contained module (`include/svo/`, `src/`). The main loop in `app/run_kitti.cpp` orchestrates them — no hidden global state.
 
-**Pose refinement** — after PnP RANSAC, a custom Gauss-Newton optimizer re-solves pose on inliers only, using Huber loss to suppress residual outliers. The refined pose replaces the RANSAC result only if reprojection RMSE improves.
+**Pose refinement** — after PnP RANSAC, a Gauss-Newton optimizer refines the pose on inliers only with Huber loss; when it converges, the result replaces the RANSAC estimate.
 
 **Motion prediction** — the frontend seeds each PnP solve with a constant-velocity prediction computed from the two most recent accepted poses, falling back to the last known pose when needed.
 
