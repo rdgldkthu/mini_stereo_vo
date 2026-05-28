@@ -23,14 +23,16 @@ struct Options {
 };
 ```
 
-| Option | Default | Meaning |
-|---|---|---|
-| `win_size` | 21×21 | Search window per pyramid level for LK |
-| `max_level` | 3 | Pyramid depth (4 levels: 0–3) |
-| `term_criteria` | 30 iter / 0.01 px EPS | Convergence criterion for LK |
-| `max_bidirectional_error_px` | 1.5 | Max allowable back-projection error in forward-backward check |
-| `image_border_px` | 10 | Points tracked to within this border are discarded |
-| `max_visualized_tracks` | 150 | Max tracks drawn in `track_vis` |
+| Option | Default | Runtime | Meaning |
+|---|---|---|---|
+| `win_size` | 21×21 | **25×25** | Search window per pyramid level for LK |
+| `max_level` | 3 | **4** | Pyramid depth (levels 0–N) |
+| `term_criteria` | 30 iter / 0.01 px EPS | — | Convergence criterion for LK |
+| `max_bidirectional_error_px` | 1.5 | 1.5 | Max allowable back-projection error in forward-backward check |
+| `image_border_px` | 10 | 10 | Points tracked to within this border are discarded |
+| `max_visualized_tracks` | 150 | 150 | Max tracks drawn in `track_vis` |
+
+Runtime values differ from struct defaults for `win_size` (25×25) and `max_level` (4); set in `run_kitti.cpp`.
 
 ---
 
@@ -60,6 +62,21 @@ struct TrackResult {
 ---
 
 ## Algorithm: Forward-Backward LK
+
+The full signature is:
+
+```cpp
+TrackResult trackFrameToFrame(
+    const Frame& prev_frame, const Frame& curr_frame,
+    const std::vector<cv::Point2f>& prev_points,
+    const std::vector<MapPoint>& prev_landmarks,
+    bool build_visualization = false,
+    cv::Point2f motion_hint = {0.0f, 0.0f}) const;
+```
+
+`motion_hint` is the median 2D optical flow from the previous frame (computed by `Frontend::processFrame`). It pre-shifts the predicted track positions before the forward LK call, improving convergence on fast-moving scenes.
+
+### Algorithm
 
 ```cpp
 // 1. Forward flow: prev → curr

@@ -5,17 +5,16 @@
 
 ## Role
 
-`Estimator` is the numerical core of the pipeline. It provides three operations:
+`Estimator` is the numerical core of the pipeline. It provides two operations:
 
 1. **`estimatePosePnPRansac`** — robust pose estimation from 3D–2D correspondences via OpenCV's `solvePnPRansac`.
 2. **`refinePosePoseOnly`** — Gauss-Newton pose-only refinement on the inlier set, using a left-perturbation SE(3) parameterisation with Huber loss.
-3. **`runLocalBundleAdjustment`** — dense Gauss-Newton joint optimisation of keyframe poses and landmark positions over a sliding window.
 
-All three methods return result structs; they do not mutate any shared state directly. `run_kitti.cpp` decides whether to accept results.
+Both methods return result structs and do not mutate shared state. `Frontend::processFrame` decides whether to accept the results.
 
 ---
 
-## Result Structs
+## Result Struct
 
 ### `PoseEstimateResult`
 
@@ -23,9 +22,7 @@ All three methods return result structs; they do not mutate any shared state dir
 struct PoseEstimateResult {
     bool success = false;
 
-    cv::Mat rvec;            // Rodrigues rotation vector (OpenCV, 3×1 CV_64F)
-    cv::Mat tvec;            // translation vector (OpenCV, 3×1 CV_64F)
-    cv::Mat inlier_indices;  // N×1 CV_32S indices into object/image_points
+    std::vector<int> inlier_indices;  // indices into object/image_points
 
     Eigen::Matrix3d rotation    = Eigen::Matrix3d::Identity();  // R_cw
     Eigen::Vector3d translation = Eigen::Vector3d::Zero();      // t_cw
@@ -33,25 +30,13 @@ struct PoseEstimateResult {
     int    num_object_points = 0;
     int    num_image_points  = 0;
     int    num_inliers       = 0;
-    double reprojection_rmse_before = 0.0;  // px, computed on all inliers before refinement
+
+    double reprojection_rmse_before = 0.0;  // px, on inliers before refinement
     double reprojection_rmse_after  = 0.0;  // px, after Gauss-Newton refinement
 };
 ```
 
-`rotation` and `translation` encode `(R_cw, t_cw)` — camera-from-world. The caller converts to `T_wc` via `makePoseWcFromPnP` in `run_kitti.cpp`.
-
-### `LocalBAResult`
-
-```cpp
-struct LocalBAResult {
-    bool success        = false;
-    int  num_keyframes  = 0;
-    int  num_landmarks  = 0;
-    int  num_observations = 0;
-    double rmse_before  = 0.0;  // px, before optimisation
-    double rmse_after   = 0.0;  // px, after optimisation
-};
-```
+`rotation` and `translation` encode `(R_cw, t_cw)` — camera-from-world. The caller converts to `T_wc` via `geometry.h::poseWcFromCw`.
 
 ---
 
@@ -60,37 +45,38 @@ struct LocalBAResult {
 ```cpp
 struct Options {
     // PnP RANSAC
-    bool   use_extrinsic_guess  = false;
-    int    iterations_count     = 100;
+    bool   use_extrinsic_guess   = false;
+    int    iterations_count      = 100;
     float  reprojection_error_px = 4.0f;
-    double confidence           = 0.99;
-    int    min_pnp_points       = 6;
+    double confidence            = 0.99;
+    int    min_pnp_points        = 6;
 
     // Pose-only refinement
     int    pose_refine_iterations  = 10;
     double pose_refine_epsilon     = 1e-6;
     double pose_refine_huber_delta = 5.0;
     int    min_refine_inliers      = 10;
-
-    // Local BA
-    int    local_ba_iterations        = 3;     // (5 in header default; 3 at runtime)
-    double local_ba_epsilon           = 1e-6;
-    double local_ba_huber_delta       = 5.0;
-    double local_ba_damping           = 1e-3;
-    int    max_ba_keyframes           = 3;     // (5 in header default; 3 at runtime)
-    int    max_ba_landmarks           = 100;   // (200 in header default; 100 at runtime)
-    int    min_ba_observations        = 20;    // (30 in header default; 20 at runtime)
-    int    min_ba_landmark_observations = 2;
 };
 ```
+
+Runtime values set in `run_kitti.cpp`:
+- `reprojection_error_px = 3.0f`
+- All other values match struct defaults.
 
 ---
 
 ## `estimatePosePnPRansac`
 
-### Signature (with initial guess)
+### Signatures
 
 ```cpp
+// No initial guess
+PoseEstimateResult estimatePosePnPRansac(
+    const std::vector<Eigen::Vector3d>& object_points,
+    const std::vector<cv::Point2f>&     image_points,
+    const Camera&                        camera) const;
+
+// With initial guess (used by Frontend::processFrame via constant-velocity model)
 PoseEstimateResult estimatePosePnPRansac(
     const std::vector<Eigen::Vector3d>& object_points,
     const std::vector<cv::Point2f>&     image_points,
@@ -100,11 +86,11 @@ PoseEstimateResult estimatePosePnPRansac(
     bool use_initial_guess) const;
 ```
 
-The no-guess overload calls this with identity and `use_initial_guess = false`.
+The no-guess overload calls the second form with identity and `use_initial_guess = false`.
 
 ### Algorithm
 
-1. Convert `Eigen::Vector3d` → `cv::Point3f` (note: **float** precision).
+1. Convert `Eigen::Vector3d` → `cv::Point3f` (float precision).
 2. Build `K` from `camera.fx, fy, cx, cy`; `dist_coeffs = 0` (rectified).
 3. If `use_initial_guess`: convert `initial_rotation_cw` to Rodrigues and fill `rvec`/`tvec`.
 4. Call `cv::solvePnPRansac(..., cv::SOLVEPNP_ITERATIVE)`.
@@ -176,53 +162,6 @@ applyLeftSE3Increment(dx, R_cw, t_cw);
 
 ---
 
-## `runLocalBundleAdjustment`
-
-Joint optimisation over the `max_ba_keyframes = 3` most recent keyframes and up to `max_ba_landmarks = 100` landmarks that appear in at least 2 of those keyframes.
-
-### Observation Gathering
-
-```
-For each of the K most recent keyframes:
-  For each tracked_landmark_id in frame.tracked_landmark_ids:
-    Count how many keyframes see this landmark.
-    Accept only landmarks seen in >= min_ba_landmark_observations (2) keyframes.
-    Cap at max_ba_landmarks (100).
-```
-
-Minimum `min_ba_observations = 20` total observations required to run.
-
-### Parameter Layout
-
-The optimisation variable is:
-
-$$\mathbf{x} = \underbrace{\xi_1, \xi_2, \ldots, \xi_{K-1}}_{6(K-1) \text{ dof}},\; \underbrace{\mathbf{p}_{w,1}, \ldots, \mathbf{p}_{w,P}}_{3P \text{ dof}}$$
-
-The **first keyframe pose is fixed** to remove gauge freedom. This means observations from keyframe 0 contribute only to the point Jacobian block, not the pose Jacobian block.
-
-### Dense Gauss-Newton with LM Damping
-
-$$H = \begin{pmatrix} H_{pp} & H_{pl} \\ H_{lp} & H_{ll} \end{pmatrix} + \lambda I, \quad \mathbf{b} = \begin{pmatrix} \mathbf{b}_p \\ \mathbf{b}_l \end{pmatrix}$$
-
-Per-observation Jacobians:
-
-- **Pose Jacobian** $J_{\text{pose}}$ (2×6): same formula as in `refinePosePoseOnly`; set to zero for the fixed keyframe 0.
-- **Point Jacobian** $J_{\text{point}}$ (2×3):
-
-$$J_{\text{point}} = J_\pi \cdot R_{cw}$$
-
-Damping factor $\lambda = 10^{-3}$ is added to the full diagonal before each LDLT solve.
-
-The same Huber weight (`delta = 5.0 px`) is applied per observation.
-
-### Write-back
-
-After convergence, the optimised `(R_cw, t_cw)` are converted back to `T_wc` and written into `ba_keyframes[k]->pose_wc`. Refined `p_w` are written back into the `landmarks` vector.
-
-The caller (`run_kitti.cpp`) accepts these only if `rmse_after <= rmse_before`; otherwise it restores from a backup.
-
----
-
 ## Internal Helper Functions (anonymous namespace)
 
 | Function | Description |
@@ -234,11 +173,9 @@ The caller (`run_kitti.cpp`) accepts these only if `rmse_after <= rmse_before`; 
 | `huberWeight(sq_err, delta)` | Returns Huber weight scalar |
 | `projectPoint(p_w, R_cw, t_cw, cam, pixel, p_c)` | Projects 3D point; returns `false` if behind camera |
 | `computeReprojectionRmse(...)` | RMSE over a set of 3D–2D correspondences |
-| `computeLocalBaRmse(...)` | RMSE over `LocalBAObservation` set |
 
 ## See Also
 
 - [`Camera`](camera.md) — provides `fx, fy, cx, cy` for Jacobian computation
 - [`Tracker`](tracker.md) — supplies `object_points` / `image_points` for PnP
-- [`Map`](map.md) — supplies `activeKeyframes()` / `activeLandmarks()` for BA
-- [`Frontend`](frontend.md) — receives refined pose via `acceptPose`; refreshes landmarks after BA
+- [`Frontend`](frontend.md) — calls `estimatePosePnPRansac` and `refinePosePoseOnly` inside `processFrame`

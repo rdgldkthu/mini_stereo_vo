@@ -5,7 +5,7 @@
 
 ## Role
 
-`Frame` is the central data carrier that flows through the pipeline. It bundles the raw stereo images, the estimated camera pose, a keyframe flag, and the 2D track positions used for BA observation lookup. Both the `Frontend` (which owns `prev_frame_`) and the `Map` (which stores active keyframes) hold instances of `Frame`.
+`Frame` is the central data carrier that flows through the pipeline. It bundles the raw stereo images, the estimated camera pose, a keyframe flag, and the 2D track positions at the time of processing. Both the `Frontend` (which owns `prev_frame_`) and the `Map` (which stores active keyframes) hold instances of `Frame`.
 
 ---
 
@@ -62,16 +62,14 @@ Frame 0 is always at identity: `pose_wc = I₄`.
 
 ## `tracked_points` / `tracked_landmark_ids` Invariant
 
-These two vectors must always be the same length and represent the same set of active observations in this frame. They are used by `Estimator::runLocalBundleAdjustment` to look up pixel observations per keyframe:
+These two vectors must always be the same length and represent the same set of active observations at the time the frame was processed. They are populated by `Frontend::processFrame` just before keyframe insertion and stored in `Map` for future reference:
 
 ```cpp
-// In Estimator::runLocalBundleAdjustment:
-const int n = std::min(frame.tracked_points.size(),
-                       frame.tracked_landmark_ids.size());
-for (int i = 0; i < n; ++i) {
-    const int landmark_id = frame.tracked_landmark_ids[i];
-    // ... build LocalBAObservation using frame.tracked_points[i]
-}
+// In Frontend::processFrame (keyframe path):
+curr_frame.tracked_points = active_points_2d_;
+curr_frame.tracked_landmark_ids.clear();
+for (const auto& lm : active_landmarks_)
+    curr_frame.tracked_landmark_ids.push_back(lm.id);
 ```
 
 ---
@@ -79,14 +77,13 @@ for (int i = 0; i < n; ++i) {
 ## Lifecycle
 
 1. **Created** by `DatasetKitti::loadFrame` (images only; `id` set, rest defaulted).
-2. **Pose set** by `Frontend::acceptPose` / `run_kitti.cpp` after successful PnP.
-3. **Track data written** in `run_kitti.cpp` just before keyframe insertion.
+2. **Pose set** by `Frontend::acceptPose` inside `processFrame` after successful PnP.
+3. **Track data written** by `Frontend::processFrame` on the keyframe path.
 4. **Stored in `Map`** via `Map::addKeyframe` when `is_keyframe = true`.
 5. **Stored in `Frontend`** as `prev_frame_` for the next tracking iteration.
 
 ## See Also
 
 - [`DatasetKitti`](dataset_kitti.md) — loads images into `Frame`
-- [`Frontend`](frontend.md) — owns `prev_frame_`; reads `pose_wc`
+- [`Frontend`](frontend.md) — owns `prev_frame_`; writes `pose_wc` and track data
 - [`Map`](map.md) — stores `Frame` objects as active keyframes
-- [`Estimator`](estimator.md) — reads `tracked_points` / `tracked_landmark_ids` for BA

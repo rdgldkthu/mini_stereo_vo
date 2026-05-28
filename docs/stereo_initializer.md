@@ -27,10 +27,19 @@ struct Options {
     double max_depth_m          = 80.0;   // maximum depth (m) after triangulation
     int    image_border_px      = 10;     // exclude this border from detection
     int    max_visualized_matches = 100;  // max matches drawn in match_vis
+    // Grid bucketing: image divided into grid_rows x grid_cols cells;
+    // only the top max_per_cell highest-response keypoints per cell are kept.
+    // Set max_per_cell <= 0 to disable.
+    int    grid_rows    = 4;
+    int    grid_cols    = 8;
+    int    max_per_cell = 10;
 };
 ```
 
-Values used in `run_kitti.cpp` match the struct defaults.
+Runtime values set in `run_kitti.cpp`:
+- `max_features = 1000` (struct default is 1500)
+- `grid_rows = 4`, `grid_cols = 8`, `max_per_cell = 10`
+- All other values match struct defaults.
 
 ---
 
@@ -137,9 +146,9 @@ Triangulated points are placed in **camera frame** with temporary IDs (`0, 1, 2,
 2. Calling `transformLandmarksToWorld(landmarks, T_wc)` to convert from camera frame to world frame before inserting into the map.
 
 ```cpp
-// In run_kitti.cpp (keyframe insertion):
-new_landmarks = transformLandmarksToWorld(new_landmarks, curr_frame.pose_wc);
-map.addLandmarks(new_landmarks);
+// Inside frontend.cpp (createKeyframeFromStereo):
+lms = transformLandmarksToWorld(lms, pose_wc);
+map.addLandmarks(lms);
 ```
 
 ---
@@ -163,4 +172,4 @@ The system requires at least 20 triangulated landmarks (`num_triangulated >= 20`
 - [`Feature`](feature.md) — struct produced by this module
 - [`MapPoint`](map_point.md) — struct produced by this module
 - [`Map`](map.md) — receives landmarks via `setActiveLandmarks` / `addLandmarks`
-- [`Frontend`](frontend.md) — receives initial points via `initialize` and `setActiveTracks`
+- [`Frontend`](frontend.md) — calls `run` inside `bootstrap` and `processFrame` (via `createKeyframeFromStereo`)
