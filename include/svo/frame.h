@@ -15,6 +15,9 @@ struct Frame {
   cv::Mat left_img;
   cv::Mat right_img;
 
+  // World-from-camera pose (T_wc). For keyframes this is a snapshot copied from
+  // Frontend::poses_ at insertion time; see that vector for the authoritative
+  // VO trajectory.
   Eigen::Matrix4d pose_wc = Eigen::Matrix4d::Identity();
 
   bool is_keyframe = false;

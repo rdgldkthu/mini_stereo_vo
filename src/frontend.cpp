@@ -30,11 +30,11 @@ makeInitialActiveLandmarks(const svo::StereoInitResult &r) {
   lms.reserve(n);
   for (size_t i = 0; i < n; ++i) {
     svo::MapPoint lm = r.landmarks[i];
-    lm.observed_times = 1;
-    lm.tracked_times  = 1;
-    lm.missed_times   = 0;
-    lm.is_outlier     = false;
-    lm.is_active      = true;
+    lm.tracked_frames        = 1;
+    lm.keyframe_observations = 1;
+    lm.missed_times          = 0;
+    lm.is_outlier            = false;
+    lm.is_active             = true;
     lms.push_back(lm);
   }
   return lms;
@@ -321,6 +321,7 @@ ProcessFrameResult Frontend::processFrame(int frame_id, Frame &curr_frame,
     if (needNewKeyframe(curr_frame.pose_wc,
                         static_cast<int>(active_points_2d_.size()), frame_id)) {
       curr_frame.is_keyframe = true;
+      map.markKeyframeObservations(culled_ids);
       if (!createKeyframeFromStereo(*this, curr_frame, curr_frame.pose_wc,
                                      initializer, map, camera,
                                      /*replace_active=*/false,

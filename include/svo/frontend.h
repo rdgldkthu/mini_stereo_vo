@@ -114,6 +114,11 @@ private:
 
   Options options_;
 
+  // Authoritative output trajectory for the VO. One entry per processed frame,
+  // world-from-camera (T_wc). Map keyframe poses are derived snapshots copied
+  // from this vector at insertion time; they never diverge while BA is absent.
+  // (The SLAM upgrade promotes the map to the single optimizable source and
+  // makes this vector a view over it instead.)
   std::vector<Eigen::Matrix4d> poses_;
   Frame prev_frame_;
 

@@ -55,8 +55,8 @@ void Map::addLandmarks(const std::vector<MapPoint> &landmarks) {
     if (idx >= 0) {
       active_landmarks_[idx].p_w = landmark.p_w;
       active_landmarks_[idx].descriptor = landmark.descriptor.clone();
-      active_landmarks_[idx].observed_times = landmark.observed_times;
-      active_landmarks_[idx].tracked_times = landmark.tracked_times;
+      active_landmarks_[idx].tracked_frames = landmark.tracked_frames;
+      active_landmarks_[idx].keyframe_observations = landmark.keyframe_observations;
       active_landmarks_[idx].missed_times = landmark.missed_times;
       active_landmarks_[idx].is_active = landmark.is_active;
       active_landmarks_[idx].is_outlier = landmark.is_outlier;
@@ -73,8 +73,8 @@ void Map::addLandmarks(const std::vector<MapPoint> &landmarks) {
 
     std::sort(active_landmarks_.begin(), active_landmarks_.end(),
               [](const MapPoint &a, const MapPoint &b) {
-                if (a.observed_times != b.observed_times) {
-                  return a.observed_times > b.observed_times;
+                if (a.tracked_frames != b.tracked_frames) {
+                  return a.tracked_frames > b.tracked_frames;
                 }
                 return a.missed_times < b.missed_times;
               });
@@ -91,8 +91,7 @@ void Map::markTrackedLandmarks(const std::vector<MapPoint> &tracked_landmarks) {
       continue;
     }
 
-    active_landmarks_[idx].tracked_times += 1;
-    active_landmarks_[idx].observed_times += 1;
+    active_landmarks_[idx].tracked_frames += 1;
     active_landmarks_[idx].missed_times = 0;
     active_landmarks_[idx].is_active = true;
     active_landmarks_[idx].is_outlier = false;
@@ -121,6 +120,15 @@ void Map::markMissedLandmarks(const std::vector<int> &tracked_landmark_ids) {
   }
 }
 
+void Map::markKeyframeObservations(const std::vector<int> &landmark_ids) {
+  for (int id : landmark_ids) {
+    const int idx = findLandmarkIndexById(id);
+    if (idx >= 0) {
+      active_landmarks_[idx].keyframe_observations += 1;
+    }
+  }
+}
+
 void Map::pruneLandmarks() {
   std::vector<MapPoint> kept;
   kept.reserve(active_landmarks_.size());
@@ -132,7 +140,7 @@ void Map::pruneLandmarks() {
     if (landmark.missed_times > options_.max_missed_times) {
       continue;
     }
-    if (landmark.observed_times < options_.min_observed_times &&
+    if (landmark.keyframe_observations < options_.min_observed_times &&
         landmark.missed_times > 2) {
       continue;
     }

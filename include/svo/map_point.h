@@ -13,8 +13,19 @@ struct MapPoint {
 
   cv::Mat descriptor;
 
-  int observed_times = 0;
-  int tracked_times = 0;
+  // How many individual frames this landmark was successfully tracked by LK.
+  // Used as a vitality signal for landmark priority when the map is at capacity.
+  int tracked_frames = 0;
+
+  // How many distinct keyframes have observed this landmark (set to 1 at
+  // triangulation, incremented by Map::markKeyframeObservations at each later
+  // keyframe where the landmark is still active). Pruning uses this counter so
+  // that landmarks never established across more than one keyframe window are
+  // cleaned up quickly, while durable landmarks are retained.
+  int keyframe_observations = 0;
+
+  // Consecutive frames in which the landmark was NOT tracked (reset to 0 on
+  // successful tracking). Pruning evicts landmarks that exceed max_missed_times.
   int missed_times = 0;
 
   bool is_outlier = false;

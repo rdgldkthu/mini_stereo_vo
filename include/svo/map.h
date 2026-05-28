@@ -31,6 +31,9 @@ public:
   void markTrackedLandmarks(const std::vector<MapPoint> &tracked_landmarks);
   void markMissedLandmarks(const std::vector<int> &tracked_landmark_ids);
   void markOutlierLandmarks(const std::vector<int> &outlier_ids);
+  // Increment keyframe_observations for each landmark in landmark_ids.
+  // Call once per keyframe insertion for the landmarks tracked at that keyframe.
+  void markKeyframeObservations(const std::vector<int> &landmark_ids);
 
   void pruneLandmarks();
 
