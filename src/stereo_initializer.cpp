@@ -70,8 +70,12 @@ void StereoInitializer::bucketFeatures(StereoInitResult& result,
       }
 
       std::sort(cell_idx.begin(), cell_idx.end(), [&result](int a, int b) {
-        return result.features[a].kp_left.response >
-               result.features[b].kp_left.response;
+        if (result.features[a].kp_left.response !=
+            result.features[b].kp_left.response) {
+          return result.features[a].kp_left.response >
+                 result.features[b].kp_left.response;
+        }
+        return a < b;
       });
 
       const int take = std::min(per_cell, static_cast<int>(cell_idx.size()));
@@ -139,7 +143,10 @@ StereoInitResult StereoInitializer::run(const Frame &frame,
 
   std::sort(distance_filtered.begin(), distance_filtered.end(),
             [](const cv::DMatch &a, const cv::DMatch &b) {
-              return a.distance < b.distance;
+              if (a.distance != b.distance) {
+                return a.distance < b.distance;
+              }
+              return a.queryIdx < b.queryIdx;
             });
 
   std::vector<double> disparities;

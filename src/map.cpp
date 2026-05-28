@@ -76,7 +76,10 @@ void Map::addLandmarks(const std::vector<MapPoint> &landmarks) {
                 if (a.tracked_frames != b.tracked_frames) {
                   return a.tracked_frames > b.tracked_frames;
                 }
-                return a.missed_times < b.missed_times;
+                if (a.missed_times != b.missed_times) {
+                  return a.missed_times < b.missed_times;
+                }
+                return a.id < b.id;
               });
 
     active_landmarks_.resize(active_landmarks_.size() - extra);

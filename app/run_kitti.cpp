@@ -104,6 +104,8 @@ int main(int argc, char **argv) {
   const auto gt_poses =
       loadKittiPoses(kitti_root / "poses" / (sequence + ".txt"));
 
+  cv::setRNGSeed(42);
+
   // -------------------------------------------------------------------------
   // Modules — each independently accessible for future SLAM backend use
   // -------------------------------------------------------------------------
