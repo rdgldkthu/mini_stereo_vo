@@ -99,6 +99,17 @@ void Map::markTrackedLandmarks(const std::vector<MapPoint> &tracked_landmarks) {
   }
 }
 
+void Map::markOutlierLandmarks(const std::vector<int> &outlier_ids) {
+  for (int id : outlier_ids) {
+    const int idx = findLandmarkIndexById(id);
+    if (idx < 0) {
+      continue;
+    }
+    active_landmarks_[idx].is_outlier = true;
+    active_landmarks_[idx].missed_times += 1;
+  }
+}
+
 void Map::markMissedLandmarks(const std::vector<int> &tracked_landmark_ids) {
   std::unordered_set<int> tracked_ids(tracked_landmark_ids.begin(),
                                       tracked_landmark_ids.end());

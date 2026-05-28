@@ -30,6 +30,7 @@ public:
 
   void markTrackedLandmarks(const std::vector<MapPoint> &tracked_landmarks);
   void markMissedLandmarks(const std::vector<int> &tracked_landmark_ids);
+  void markOutlierLandmarks(const std::vector<int> &outlier_ids);
 
   void pruneLandmarks();
 

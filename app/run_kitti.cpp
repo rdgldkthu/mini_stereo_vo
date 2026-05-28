@@ -8,6 +8,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include <Eigen/Core>
@@ -120,6 +121,28 @@ void gatherPnPInliers(const std::vector<Eigen::Vector3d> &object_points,
   }
 }
 
+
+void filterTrackedByInliers(
+    const std::vector<cv::Point2f> &points,
+    const std::vector<svo::MapPoint> &landmarks,
+    const std::vector<int> &inlier_indices,
+    std::vector<cv::Point2f> &out_points,
+    std::vector<svo::MapPoint> &out_landmarks,
+    std::vector<int> &out_outlier_ids) {
+  const std::unordered_set<int> inlier_set(inlier_indices.begin(),
+                                           inlier_indices.end());
+  out_points.clear();
+  out_landmarks.clear();
+  out_outlier_ids.clear();
+  for (int i = 0; i < static_cast<int>(points.size()); ++i) {
+    if (inlier_set.count(i)) {
+      out_points.push_back(points[i]);
+      out_landmarks.push_back(landmarks[i]);
+    } else {
+      out_outlier_ids.push_back(landmarks[i].id);
+    }
+  }
+}
 
 std::vector<Eigen::Matrix4d> loadKittiPoses(const fs::path &pose_path) {
   std::vector<Eigen::Matrix4d> poses;
@@ -373,6 +396,7 @@ int main(int argc, char **argv) {
 
     svo::FrontendFrameStats frame_stats;
     Eigen::Matrix4d candidate_pose = frontend.currentPose();
+    std::vector<int> pnp_inlier_indices;
 
     // ---------------------------------------------------------------------
     // Raw PnP + pose-only refinement
@@ -390,6 +414,7 @@ int main(int argc, char **argv) {
 
       if (raw_pose_result.success) {
         frame_stats.pose_success = true;
+        pnp_inlier_indices = raw_pose_result.inlier_indices;
 
         svo::PoseEstimateResult final_pose_result = raw_pose_result;
 
@@ -432,11 +457,36 @@ int main(int argc, char **argv) {
     }
 
     // ---------------------------------------------------------------------
+    // Cull PnP outliers from the tracked set
+    // Geometric outliers found by RANSAC are dropped immediately so they
+    // cannot bias future pose estimates. Culled size is used for all
+    // downstream decisions (reinit threshold, setActiveTracks, map updates).
+    // ---------------------------------------------------------------------
+    std::vector<cv::Point2f> culled_points;
+    std::vector<svo::MapPoint> culled_landmarks;
+    std::vector<int> culled_landmark_ids;
+
+    if (!pnp_inlier_indices.empty()) {
+      std::vector<int> outlier_ids;
+      filterTrackedByInliers(track_result.curr_points,
+                             track_result.tracked_landmarks, pnp_inlier_indices,
+                             culled_points, culled_landmarks, outlier_ids);
+      for (const auto &lm : culled_landmarks) {
+        culled_landmark_ids.push_back(lm.id);
+      }
+      map.markOutlierLandmarks(outlier_ids);
+    } else {
+      culled_points = track_result.curr_points;
+      culled_landmarks = track_result.tracked_landmarks;
+      culled_landmark_ids = track_result.landmark_ids;
+    }
+
+    // ---------------------------------------------------------------------
     // Reinitialization policy
     // ---------------------------------------------------------------------
     if (frontend.shouldReinitialize(
             frame_id, frame_stats.pose_accepted,
-            static_cast<int>(track_result.curr_points.size()))) {
+            static_cast<int>(culled_points.size()))) {
       std::cout << "Reinitializing at frame " << frame_id << "\n";
 
       const svo::StereoInitResult reinit_result =
@@ -457,16 +507,15 @@ int main(int argc, char **argv) {
         frame_stats.reinitialized = true;
         motion_hint = {0.0f, 0.0f};
       } else {
-        frontend.setActiveTracks(track_result.curr_points, track_result.tracked_landmarks);
+        frontend.setActiveTracks(culled_points, culled_landmarks);
       }
     } else {
-      frontend.setActiveTracks(track_result.curr_points,
-                               track_result.tracked_landmarks);
+      frontend.setActiveTracks(culled_points, culled_landmarks);
     }
 
     if (!frame_stats.reinitialized) {
-      map.markTrackedLandmarks(track_result.tracked_landmarks);
-      map.markMissedLandmarks(track_result.landmark_ids);
+      map.markTrackedLandmarks(culled_landmarks);
+      map.markMissedLandmarks(culled_landmark_ids);
       map.pruneLandmarks();
     }
 
