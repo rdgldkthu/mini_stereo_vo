@@ -1,12 +1,12 @@
 # mini_stereo_vo
 
-![Tracking overlay](assets/tracking.gif)
-
 Stereo visual odometry built from scratch in C++. Tracks a moving camera through KITTI sequences using stereo triangulation, pyramidal LK tracking, and PnP with Gauss-Newton pose refinement — no SLAM library, no shortcuts. A sliding-window map manages active landmarks and keyframes; a constant-velocity motion model seeds each PnP solve. The pipeline is visualized in real time with [Rerun](https://www.rerun.io/). A regression test gates every build on APE against KITTI seq 05.
 
 `C++ 17` · `Eigen3` · `OpenCV` · `Rerun` · `CMake / Ninja` · `KITTI` · `evo`
 
-![Trajectory](assets/trajectory.png)
+<p align="center"><img src="assets/tracking.gif" width="720" alt="Tracking overlay"></p>
+
+<p align="center"><img src="assets/trajectory.png" width="720" alt="Trajectory"></p>
 
 ---
 
@@ -60,6 +60,29 @@ Runs through all 2 761 frames of KITTI seq 05. Median inlier ratio 0.91. Traject
 | RPE (m/frame) | 0.069 | 0.041 | 0.028 |
 
 **Runtime** — 13.8 ms/frame avg (Release build, `OPENCV_TRACE=0`, KITTI seq 05 on CPU)
+
+---
+
+## Limitations
+
+- **Drift accumulates** — no loop closure or global optimization; error grows roughly linearly with path length.
+- **Pose-only refinement** — Gauss-Newton tightens the current pose but does not touch landmark positions; no full bundle adjustment.
+- **Sliding-window map only** — evicted landmarks are gone; the system cannot relocalize against a persistent map.
+- **Constant-velocity motion model** — prediction breaks under abrupt accelerations or rotation-dominant motion; no IMU integration.
+- **KITTI-only I/O** — `DatasetKitti` hard-codes the KITTI directory layout and calibration format; no generic adapter.
+- **Rectified stereo assumed** — triangulation relies on pre-rectified images with a known baseline; raw/unrectified pairs are not supported.
+- **Single-threaded** — tracking, estimation, map management, and visualization all run sequentially on the main thread.
+
+---
+
+## TODO
+
+- [ ] Loop closure — integrate a place-recognition module (e.g. DBoW2/DBoW3) and add a pose-graph correction step.
+- [ ] Full bundle adjustment — optimize landmark positions alongside poses in a local window (g2o or Ceres).
+- [ ] Persistent map — store and reload the landmark map to enable relocalization across sessions.
+- [ ] Multi-threading — separate tracking, local mapping, and loop-closure into independent threads (PTAM-style).
+- [ ] IMU pre-integration — fuse inertial measurements for better motion prediction and scale observability.
+- [ ] Generic dataset loader — support EuRoC MAV and TUM-VI formats alongside KITTI.
 
 ---
 
