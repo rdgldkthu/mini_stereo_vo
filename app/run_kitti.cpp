@@ -25,7 +25,6 @@
 #include "svo/stereo_initializer.h"
 #include "svo/tracker.h"
 #include "svo/rerun_viewer.h"
-#include "svo/viewer.h"
 
 namespace fs = std::filesystem;
 
@@ -281,12 +280,6 @@ int main(int argc, char **argv) {
   map_options.min_observed_times = 2;
   map_options.max_missed_times = 8;
   svo::Map map(map_options);
-
-  svo::Viewer::Options viewer_options;
-  viewer_options.image_wait_ms = 1;
-  viewer_options.trajectory_size = 600;
-  viewer_options.trajectory_scale = 0.5;
-  svo::Viewer viewer(viewer_options);
 
   std::optional<svo::RerunViewer> rerun_viewer;
   if (!no_viewer) {
@@ -637,13 +630,6 @@ int main(int argc, char **argv) {
     if (rerun_viewer)
       rerun_viewer->update(frame_id, curr_frame.left_img, frontend.activePoints(),
                            frontend.poses(), gt_poses, viewer_status);
-
-    // Fallback: OpenCV 2D viewer (uncomment to use instead of Rerun)
-    // if (!viewer.update(curr_frame.left_img, frontend.activePoints(), frontend.poses(), gt_poses,
-    //                    viewer_status)) {
-    //   std::cout << "Viewer requested exit.\n";
-    //   break;
-    // }
 
     ++frames_processed;
   }
