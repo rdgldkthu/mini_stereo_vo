@@ -235,7 +235,21 @@ ProcessFrameResult Frontend::processFrame(int frame_id, Frame &curr_frame,
   if (tr.num_valid_correspondences >= est_opts.min_pnp_points) {
     Eigen::Matrix3d init_R_cw = Eigen::Matrix3d::Identity();
     Eigen::Vector3d init_t_cw = Eigen::Vector3d::Zero();
-    makePoseCwFromPoseWc(poses_.back(), init_R_cw, init_t_cw);
+
+    // Constant-velocity seed: T_pred = T_curr * T_prev^{-1} * T_curr.
+    // Falls back to the last pose when fewer than two poses exist or when the
+    // previous frame's pose was rejected (no reliable velocity estimate).
+    if (poses_.size() >= 2 && consecutive_rejected_poses_ == 0) {
+      const Eigen::Matrix4d &T_prev = poses_[poses_.size() - 2];
+      const Eigen::Matrix4d &T_curr = poses_.back();
+      Eigen::Matrix4d T_prev_inv    = Eigen::Matrix4d::Identity();
+      T_prev_inv.block<3, 3>(0, 0)  = T_prev.block<3, 3>(0, 0).transpose();
+      T_prev_inv.block<3, 1>(0, 3)  =
+          -T_prev_inv.block<3, 3>(0, 0) * T_prev.block<3, 1>(0, 3);
+      makePoseCwFromPoseWc(T_curr * T_prev_inv * T_curr, init_R_cw, init_t_cw);
+    } else {
+      makePoseCwFromPoseWc(poses_.back(), init_R_cw, init_t_cw);
+    }
 
     const PoseEstimateResult raw =
         estimator.estimatePosePnPRansac(tr.object_points, tr.image_points,
