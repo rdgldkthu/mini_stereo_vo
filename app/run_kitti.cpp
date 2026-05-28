@@ -249,14 +249,6 @@ int main(int argc, char **argv) {
   estimator_options.pose_refine_epsilon = 1e-6;
   estimator_options.pose_refine_huber_delta = 5.0;
   estimator_options.min_refine_inliers = 10;
-  estimator_options.local_ba_iterations = 3;
-  estimator_options.local_ba_epsilon = 1e-6;
-  estimator_options.local_ba_huber_delta = 5.0;
-  estimator_options.local_ba_damping = 1e-3;
-  estimator_options.max_ba_keyframes = 3;
-  estimator_options.max_ba_landmarks = 100;
-  estimator_options.min_ba_observations = 20;
-  estimator_options.min_ba_landmark_observations = 2;
   svo::Estimator estimator(estimator_options);
 
   svo::Frontend::Options frontend_options;
@@ -271,7 +263,6 @@ int main(int argc, char **argv) {
   frontend_options.min_reinit_frame_gap = 10;
   frontend_options.weak_track_threshold = 80;
   frontend_options.emergency_rejected_poses_count = 2;
-  frontend_options.local_ba_keyframe_interval = 2;
   svo::Frontend frontend(frontend_options);
 
   svo::Map::Options map_options;
@@ -335,13 +326,12 @@ int main(int argc, char **argv) {
   std::ofstream stats("results/debug/" + file_name_stem + "_stats.csv");
   stats << "frame_id,num_active_points,num_correspondences,num_inliers,"
            "inlier_ratio,pose_success,pose_accepted,reinitialized,is_keyframe,"
-           "num_keyframes,num_map_landmarks,local_ba,local_ba_accepted,"
-           "local_ba_rejected,ba_rmse_before,ba_rmse_after,"
+           "num_keyframes,num_map_landmarks,"
            "tx,ty,tz,delta_t,rmse_before,rmse_after\n";
 
   stats << "0," << frontend.activePoints().size() << ",0,0,0.0,1,1,0,1,"
         << map.numActiveKeyframes() << "," << map.numActiveLandmarks() << ","
-        << "0,0,0,0,0,0,0,0,0,0,0\n";
+        << "0,0,0,0,0,0\n";
 
   // -------------------------------------------------------------------------
   // Main VO loop
@@ -358,7 +348,7 @@ int main(int argc, char **argv) {
 
       const Eigen::Vector3d t_out = frontend.currentPose().block<3, 1>(0, 3);
       stats << frame_id << ",0,0,0,0.0,0,0,0,0," << map.numActiveKeyframes()
-            << "," << map.numActiveLandmarks() << "," << "0,0,0,0,0," << t_out(0)
+            << "," << map.numActiveLandmarks() << "," << t_out(0)
             << "," << t_out(1) << "," << t_out(2) << ",0,0,0\n";
       continue;
     }
@@ -518,44 +508,6 @@ int main(int argc, char **argv) {
         frontend.noteKeyframeInserted(frame_id, curr_frame.pose_wc);
         frame_stats.inserted_keyframe = true;
 
-        // -------------------------
-        // Local bundle adjustment
-        // -------------------------
-        if (map.numActiveKeyframes() >= 3 && map.numActiveLandmarks() >= 20 && frontend.shouldRunLocalBA()) {
-          std::deque<svo::Frame> keyframe_backup = map.activeKeyframes();
-          std::vector<svo::MapPoint> landmarks_backup = map.activeLandmarks();
-
-          svo::LocalBAResult ba_result = estimator.runLocalBundleAdjustment(map.mutableActiveKeyframes(), map.mutableActiveLandmarks(), camera);
-
-          frame_stats.ran_local_ba = true;
-          if (ba_result.success && ba_result.rmse_after > 0.0 && ba_result.rmse_after <= ba_result.rmse_before) {
-            frame_stats.local_ba_accepted = true;
-            frame_stats.ba_rmse_before = ba_result.rmse_before;
-            frame_stats.ba_rmse_after = ba_result.rmse_after;
-
-            frontend.refreshActiveLandmarksFromMap(map.activeLandmarks());
-            frontend.noteLocalBaAccepted();
-
-            std::cout << "Local BA at frame " << frame_id
-                      << "  | keyframes: " << ba_result.num_keyframes
-                      << "  | landmarks: " << ba_result.num_landmarks
-                      << "  | observations: " << ba_result.num_observations
-                      << "  | rmse: " << ba_result.rmse_before
-                      << " -> " << ba_result.rmse_after << "\n";
-          } else {
-            map.mutableActiveKeyframes() = keyframe_backup;
-            map.mutableActiveLandmarks() = landmarks_backup;
-
-            frame_stats.local_ba_rejected = true;
-            if (ba_result.success) {
-              frame_stats.ba_rmse_before = ba_result.rmse_before;
-              frame_stats.ba_rmse_after = ba_result.rmse_after;
-            }
-
-            std::cout << "Rejected local BA at frame " << frame_id << "\n";
-          }
-        }
-
         std::cout << "Inserted keyframe at frame " << frame_id
         << "  | active keyframes: " << map.numActiveKeyframes()
         << "  | active landmarks: " << map.numActiveLandmarks() << "\n";
@@ -575,11 +527,7 @@ int main(int argc, char **argv) {
           << (frame_stats.reinitialized ? 1 : 0) << ","
           << (frame_stats.inserted_keyframe ? 1 : 0) << ","
           << map.numActiveKeyframes() << "," << map.numActiveLandmarks() << ","
-          << (frame_stats.ran_local_ba ? 1 : 0) << ","
-          << (frame_stats.local_ba_accepted ? 1 : 0) << ","
-          << (frame_stats.local_ba_rejected ? 1 : 0) << ","
-          << frame_stats.ba_rmse_before << "," << frame_stats.ba_rmse_after
-          << "," << t_out(0) << "," << t_out(1) << "," << t_out(2) << ","
+          << t_out(0) << "," << t_out(1) << "," << t_out(2) << ","
           << frame_stats.delta_t << "," << frame_stats.rmse_before << ","
           << frame_stats.rmse_after << "\n";
 
@@ -622,7 +570,6 @@ int main(int argc, char **argv) {
     viewer_status.pose_accepted = frame_stats.pose_accepted;
     viewer_status.reinitialized = frame_stats.reinitialized;
     viewer_status.inserted_keyframe = frame_stats.inserted_keyframe;
-    viewer_status.ran_local_ba = frame_stats.ran_local_ba;
     viewer_status.delta_t = frame_stats.delta_t;
     viewer_status.rmse_before = frame_stats.rmse_before;
     viewer_status.rmse_after = frame_stats.rmse_after;

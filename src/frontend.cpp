@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <unordered_map>
 
 namespace svo {
 Frontend::Frontend(const Options &options) : options_(options) {}
@@ -26,7 +25,6 @@ void Frontend::initialize(const Frame &frame0,
   last_init_frame_id_ = frame0.id;
   consecutive_rejected_poses_ = 0;
   dense_debug_center_ = -1;
-  inserted_keyframes_since_last_ba_ = 0;
 }
 
 bool Frontend::acceptPose(int frame_id, int num_inliers,
@@ -91,18 +89,6 @@ void Frontend::noteKeyframeInserted(int frame_id,
                                     const Eigen::Matrix4d &pose_wc) {
   last_keyframe_frame_id_ = frame_id;
   last_keyframe_pose_wc_ = pose_wc;
-  inserted_keyframes_since_last_ba_++;
-}
-
-void Frontend::noteLocalBaAccepted() { inserted_keyframes_since_last_ba_ = 0; }
-
-bool Frontend::shouldRunLocalBA() {
-  if (inserted_keyframes_since_last_ba_ >=
-      options_.local_ba_keyframe_interval) {
-    inserted_keyframes_since_last_ba_ = 0;
-    return true;
-  }
-  return false;
 }
 
 void Frontend::repeatLastPose() { poses_.push_back(poses_.back()); }
@@ -117,21 +103,6 @@ void Frontend::setActiveTracks(const std::vector<cv::Point2f> &points,
                                 const std::vector<MapPoint> &landmarks) {
   active_points_2d_ = points;
   active_landmarks_ = landmarks;
-}
-
-void Frontend::refreshActiveLandmarksFromMap(
-    const std::vector<MapPoint> &map_landmarks) {
-  std::unordered_map<int, const MapPoint *> id_to_lm;
-  id_to_lm.reserve(map_landmarks.size());
-  for (const auto &lm : map_landmarks) {
-    id_to_lm[lm.id] = &lm;
-  }
-  for (auto &lm : active_landmarks_) {
-    const auto it = id_to_lm.find(lm.id);
-    if (it != id_to_lm.end()) {
-      lm = *it->second;
-    }
-  }
 }
 
 bool Frontend::shouldSaveDenseDebug(int frame_id, int radius) const {

@@ -16,17 +16,12 @@ struct FrontendFrameStats {
   bool pose_accepted = false;
   bool reinitialized = false;
   bool inserted_keyframe = false;
-  bool ran_local_ba = false;
-  bool local_ba_accepted = false;
-  bool local_ba_rejected = false;
 
   int num_inliers = 0;
   double inlier_ratio = 0.0;
   double delta_t = 0.0;
   double rmse_before = 0.0;
   double rmse_after = 0.0;
-  double ba_rmse_before = 0.0;
-  double ba_rmse_after = 0.0;
 };
 
 class Frontend {
@@ -46,8 +41,6 @@ public:
     int min_reinit_frame_gap = 10;
     int weak_track_threshold = 80;
     int emergency_rejected_poses_count = 2;
-
-    int local_ba_keyframe_interval = 2;
   };
 
   explicit Frontend(const Options &options);
@@ -73,15 +66,11 @@ public:
   void setActiveTracks(const std::vector<cv::Point2f> &points,
                        const std::vector<MapPoint> &landmarks);
 
-  void refreshActiveLandmarksFromMap(const std::vector<MapPoint> &map_landmarks);
-
   bool shouldSaveDenseDebug(int frame_id, int radius) const;
 
   void noteReinitialized(int frame_id);
   void notePoseRejected(int frame_id);
   void noteKeyframeInserted(int frame_id, const Eigen::Matrix4d &pose_wc);
-  void noteLocalBaAccepted();
-  bool shouldRunLocalBA();
 
   const std::vector<Eigen::Matrix4d> &poses() const { return poses_; }
   const Eigen::Matrix4d &currentPose() const { return poses_.back(); }
@@ -114,7 +103,6 @@ private:
   int last_init_frame_id_ = 0;
   int consecutive_rejected_poses_ = 0;
   int dense_debug_center_ = -1;
-  int inserted_keyframes_since_last_ba_ = 0;
 };
 
 } // namespace svo

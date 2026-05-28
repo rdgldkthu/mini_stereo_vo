@@ -12,7 +12,6 @@ struct ViewerStatus {
   bool pose_accepted = false;
   bool reinitialized = false;
   bool inserted_keyframe = false;
-  bool ran_local_ba = false;
 
   double delta_t = 0.0;
   double rmse_before = 0.0;
