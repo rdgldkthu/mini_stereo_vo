@@ -4,12 +4,18 @@
 #include <vector>
 
 #include <Eigen/Core>
-#include <opencv2/opencv.hpp>
+#include <opencv2/core.hpp>
 
 #include "svo/frame.h"
 #include "svo/map_point.h"
 
 namespace svo {
+
+class Camera;
+class Estimator;
+class Map;
+class StereoInitializer;
+class Tracker;
 
 struct FrontendFrameStats {
   bool pose_success = false;
@@ -17,11 +23,18 @@ struct FrontendFrameStats {
   bool reinitialized = false;
   bool inserted_keyframe = false;
 
+  int num_correspondences = 0;
   int num_inliers = 0;
   double inlier_ratio = 0.0;
   double delta_t = 0.0;
   double rmse_before = 0.0;
   double rmse_after = 0.0;
+};
+
+struct ProcessFrameResult {
+  FrontendFrameStats stats;
+  cv::Mat track_vis;       // non-empty only when save_debug=true
+  bool should_exit = false;
 };
 
 class Frontend {
@@ -45,8 +58,18 @@ public:
 
   explicit Frontend(const Options &options);
 
-  void initialize(const Frame &frame0, std::vector<cv::Point2f> active_points,
-                  std::vector<MapPoint> active_landmarks);
+  // Stereo-initialise from frame 0 and seed the map.
+  // Returns true on success; optionally writes the match visualisation to *init_vis.
+  bool bootstrap(Frame &frame0, StereoInitializer &initializer, Map &map,
+                 const Camera &camera, bool save_debug = false,
+                 cv::Mat *init_vis = nullptr);
+
+  // Run one frame through the full VO pipeline.
+  // All module references are owned by the caller (main / SLAM orchestrator).
+  ProcessFrameResult processFrame(int frame_id, Frame &curr_frame,
+                                  Tracker &tracker, Estimator &estimator,
+                                  StereoInitializer &initializer, Map &map,
+                                  const Camera &camera, bool save_debug = false);
 
   bool needNewKeyframe(const Eigen::Matrix4d &current_pose_wc,
                        int num_tracked_points, int current_frame_id) const;
@@ -75,9 +98,6 @@ public:
   const std::vector<Eigen::Matrix4d> &poses() const { return poses_; }
   const Eigen::Matrix4d &currentPose() const { return poses_.back(); }
 
-  const Frame &previousFrame() const { return prev_frame_; }
-  void setPreviousFrame(const Frame &frame) { prev_frame_ = frame; }
-
   std::vector<cv::Point2f> &activePoints() { return active_points_2d_; }
   const std::vector<cv::Point2f> &activePoints() const {
     return active_points_2d_;
@@ -89,6 +109,9 @@ public:
   }
 
 private:
+  void initialize(const Frame &frame0, std::vector<cv::Point2f> active_points,
+                  std::vector<MapPoint> active_landmarks);
+
   Options options_;
 
   std::vector<Eigen::Matrix4d> poses_;
@@ -103,6 +126,8 @@ private:
   int last_init_frame_id_ = 0;
   int consecutive_rejected_poses_ = 0;
   int dense_debug_center_ = -1;
+
+  cv::Point2f motion_hint_{0.f, 0.f};
 };
 
 } // namespace svo

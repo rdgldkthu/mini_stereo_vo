@@ -43,6 +43,8 @@ public:
 
   explicit Estimator(const Options &options);
 
+  const Options &options() const { return options_; }
+
   PoseEstimateResult
   estimatePosePnPRansac(const std::vector<Eigen::Vector3d> &object_points,
                         const std::vector<cv::Point2f> &image_points,
