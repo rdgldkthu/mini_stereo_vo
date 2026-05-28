@@ -55,3 +55,23 @@ target_link_libraries(run_kitti
 target_compile_options(run_kitti
   PRIVATE -Wall -Wextra -Wpedantic
 )
+
+# ---------------------------------------------------------------------------
+# Regression test — skips automatically when KITTI data or evo is absent
+# ---------------------------------------------------------------------------
+enable_testing()
+
+set(REGRESSION_MAX_FRAMES "100" CACHE STRING
+    "Number of KITTI frames used by the regression_kitti_05 CTest")
+set(REGRESSION_APE_THRESHOLD "2.0" CACHE STRING
+    "APE RMSE ceiling in metres for the regression_kitti_05 CTest")
+
+add_test(
+  NAME regression_kitti_05
+  COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_regression.sh
+          "05" "${REGRESSION_MAX_FRAMES}" "${REGRESSION_APE_THRESHOLD}"
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+set_tests_properties(regression_kitti_05 PROPERTIES
+  SKIP_RETURN_CODE 77
+)

@@ -53,7 +53,9 @@ std::vector<Eigen::Matrix4d> loadKittiPoses(const fs::path &pose_path) {
 int main(int argc, char **argv) {
   if (argc < 3) {
     std::cerr << "Usage: " << argv[0]
-              << " <kitti_root> <sequence> [pose_keyword] [--save-debug] [--no-viewer]\n";
+              << " <kitti_root> <sequence> [pose_keyword]"
+                 " [--save-debug] [--no-viewer]"
+                 " [--max-frames N] [--output-file PATH]\n";
     return 1;
   }
 
@@ -62,11 +64,18 @@ int main(int argc, char **argv) {
 
   bool save_debug = false;
   bool no_viewer  = false;
+  int  max_frames = -1;
   std::string pose_keyword;
+  std::string output_file_override;
   for (int i = 3; i < argc; ++i) {
-    if (std::string(argv[i]) == "--save-debug")  save_debug = true;
-    else if (std::string(argv[i]) == "--no-viewer") no_viewer = true;
-    else pose_keyword = argv[i];
+    const std::string arg = argv[i];
+    if (arg == "--save-debug")  save_debug = true;
+    else if (arg == "--no-viewer") no_viewer = true;
+    else if (arg == "--max-frames" && i + 1 < argc)
+      max_frames = std::stoi(argv[++i]);
+    else if (arg == "--output-file" && i + 1 < argc)
+      output_file_override = argv[++i];
+    else pose_keyword = arg;
   }
 
   std::time_t now = std::time(nullptr);
@@ -77,11 +86,13 @@ int main(int argc, char **argv) {
   const std::string file_name_stem = pose_keyword.empty()
       ? sequence + "_" + date_str
       : sequence + "_" + date_str + "_" + pose_keyword;
-  const fs::path output_pose =
-      fs::path("results/traj") / (file_name_stem + ".txt");
 
   fs::create_directories("results/debug");
   fs::create_directories("results/traj");
+
+  const fs::path output_pose = output_file_override.empty()
+      ? fs::path("results/traj") / (file_name_stem + ".txt")
+      : fs::path(output_file_override);
 
   // -------------------------------------------------------------------------
   // Dataset + camera
@@ -208,6 +219,7 @@ int main(int argc, char **argv) {
   int        frames_processed = 0;
 
   for (int frame_id = 1; frame_id < dataset.numFrames(); ++frame_id) {
+    if (max_frames > 0 && frame_id >= max_frames) break;
     svo::Frame curr_frame;
     if (!dataset.loadFrame(frame_id, curr_frame)) {
       std::cerr << "Failed to load frame " << frame_id << "\n";
