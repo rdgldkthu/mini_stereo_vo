@@ -7,6 +7,7 @@
 
 #include "svo/camera.h"
 #include "svo/estimator.h"
+#include "svo/geometry.h"
 #include "svo/map.h"
 #include "svo/stereo_initializer.h"
 #include "svo/tracker.h"
@@ -40,20 +41,6 @@ makeInitialActiveLandmarks(const svo::StereoInitResult &r) {
   return lms;
 }
 
-Eigen::Matrix4d makePoseWcFromPnP(const Eigen::Matrix3d &R_cw,
-                                   const Eigen::Vector3d &t_cw) {
-  const Eigen::Matrix3d R_wc = R_cw.transpose();
-  Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
-  T.block<3, 3>(0, 0) = R_wc;
-  T.block<3, 1>(0, 3) = -R_wc * t_cw;
-  return T;
-}
-
-void makePoseCwFromPoseWc(const Eigen::Matrix4d &T_wc,
-                           Eigen::Matrix3d &R_cw, Eigen::Vector3d &t_cw) {
-  R_cw = T_wc.block<3, 3>(0, 0).transpose();
-  t_cw = -R_cw * T_wc.block<3, 1>(0, 3);
-}
 
 std::vector<svo::MapPoint>
 transformLandmarksToWorld(std::vector<svo::MapPoint> lms,
@@ -246,9 +233,9 @@ ProcessFrameResult Frontend::processFrame(int frame_id, Frame &curr_frame,
       T_prev_inv.block<3, 3>(0, 0)  = T_prev.block<3, 3>(0, 0).transpose();
       T_prev_inv.block<3, 1>(0, 3)  =
           -T_prev_inv.block<3, 3>(0, 0) * T_prev.block<3, 1>(0, 3);
-      makePoseCwFromPoseWc(T_curr * T_prev_inv * T_curr, init_R_cw, init_t_cw);
+      svo::poseCwFromWc(T_curr * T_prev_inv * T_curr, init_R_cw, init_t_cw);
     } else {
-      makePoseCwFromPoseWc(poses_.back(), init_R_cw, init_t_cw);
+      svo::poseCwFromWc(poses_.back(), init_R_cw, init_t_cw);
     }
 
     const PoseEstimateResult raw =
@@ -276,7 +263,7 @@ ProcessFrameResult Frontend::processFrame(int frame_id, Frame &curr_frame,
       fs.rmse_after  = final_pose.reprojection_rmse_after;
 
       acceptPose(frame_id, raw.num_inliers, tr.num_valid_correspondences,
-                 makePoseWcFromPnP(final_pose.rotation, final_pose.translation),
+                 svo::poseWcFromCw(final_pose.rotation, final_pose.translation),
                  fs);
     } else {
       rejectPose(frame_id, tr.num_valid_correspondences, fs);

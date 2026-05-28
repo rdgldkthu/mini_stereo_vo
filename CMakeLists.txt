@@ -66,6 +66,10 @@ set(REGRESSION_MAX_FRAMES "100" CACHE STRING
 set(REGRESSION_APE_THRESHOLD "2.0" CACHE STRING
     "APE RMSE ceiling in metres for the regression_kitti_05 CTest")
 
+add_executable(test_geometry tests/test_geometry.cpp)
+target_link_libraries(test_geometry PRIVATE svo_core)
+add_test(NAME unit_geometry COMMAND test_geometry)
+
 add_test(
   NAME regression_kitti_05
   COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_regression.sh
