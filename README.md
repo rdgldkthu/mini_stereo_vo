@@ -29,9 +29,6 @@ Stereo visual odometry built from scratch in C++. Tracks a moving camera through
          │
          ▼
     [Map]          ── sliding window: 5 keyframes · 2 000 landmarks ──────────▶  pruned map
-         │
-         ▼
-  [Local BA]      ── joint pose + landmark optimization every 2 keyframes ────▶  refined poses
 ```
 
 Each stage is a self-contained module (`include/svo/`, `src/`). The main loop in `app/run_kitti.cpp` orchestrates them — no hidden global state.
