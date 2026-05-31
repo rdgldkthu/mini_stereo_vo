@@ -11,12 +11,20 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 find_package(Eigen3 REQUIRED)
+
+set(BUILD_SOPHUS_TESTS OFF CACHE BOOL "" FORCE)
+set(SOPHUS_INSTALL OFF CACHE BOOL "" FORCE)
+add_subdirectory(third_party/Sophus)
+
+find_package(Ceres REQUIRED)
+
 find_package(OpenCV REQUIRED COMPONENTS core imgcodecs imgproc highgui features2d video calib3d)
 
 include(FetchContent)
 FetchContent_Declare(
   rerun_sdk
   URL https://github.com/rerun-io/rerun/releases/download/0.22.1/rerun_cpp_sdk.zip
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 FetchContent_MakeAvailable(rerun_sdk)
 
@@ -37,7 +45,7 @@ target_include_directories(svo_core
 )
 
 target_link_libraries(svo_core
-  PUBLIC Eigen3::Eigen ${OpenCV_LIBS} rerun_sdk
+  PUBLIC Eigen3::Eigen Sophus::Sophus Ceres::ceres ${OpenCV_LIBS} rerun_sdk
 )
 
 target_compile_options(svo_core

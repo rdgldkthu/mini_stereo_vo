@@ -1,74 +1,51 @@
 #include "svo/estimator.h"
 
-#include <cmath>
-#include <limits>
 #include <vector>
 
 #include <Eigen/Dense>
+#include <ceres/ceres.h>
 #include <opencv2/calib3d.hpp>
+#include <sophus/ceres_manifold.hpp>
+#include <sophus/se3.hpp>
 
 namespace svo {
 namespace {
 
-Eigen::Matrix3d hat(const Eigen::Vector3d &w) {
-  Eigen::Matrix3d W = Eigen::Matrix3d::Zero();
-  W(0, 1) = -w(2);
-  W(0, 2) = w(1);
-  W(1, 0) = w(2);
-  W(1, 2) = -w(0);
-  W(2, 0) = -w(1);
-  W(2, 1) = w(0);
-  return W;
-}
+struct ReprojectionCostFunctor {
+  ReprojectionCostFunctor(const Eigen::Vector3d &p_w, const cv::Point2f &obs,
+                          double fx, double fy, double cx, double cy)
+      : p_w_(p_w), obs_(obs.x, obs.y), fx_(fx), fy_(fy), cx_(cx), cy_(cy) {}
 
-Eigen::Matrix3d expSO3(const Eigen::Vector3d &w) {
-  const double theta = w.norm();
-  if (theta < 1e-12) {
-    return Eigen::Matrix3d::Identity() + hat(w);
+  template <typename T>
+  bool operator()(const T* const pose_data, T* residuals) const {
+    const Eigen::Map<const Sophus::SE3<T>> T_cw(pose_data);
+    const Eigen::Matrix<T, 3, 1> p_c = T_cw * p_w_.cast<T>();
+
+    if (p_c[2] <= T(1e-8)) {
+      residuals[0] = T(0);
+      residuals[1] = T(0);
+      return true;
+    }
+
+    residuals[0] = T(fx_) * p_c[0] / p_c[2] + T(cx_) - T(obs_[0]);
+    residuals[1] = T(fy_) * p_c[1] / p_c[2] + T(cy_) - T(obs_[1]);
+
+    return true;
   }
 
-  const Eigen::Vector3d a = w / theta;
-  const Eigen::Matrix3d A = hat(a);
-
-  return Eigen::Matrix3d::Identity() + std::sin(theta) * A +
-         (1.0 - std::cos(theta)) * A * A;
-}
-
-Eigen::Matrix3d leftJacobianSO3(const Eigen::Vector3d &w) {
-  const double theta = w.norm();
-  const Eigen::Matrix3d W = hat(w);
-
-  if (theta < 1e-10) {
-    return Eigen::Matrix3d::Identity() + 0.5 * W + (1.0 / 6.0) * W * W;
+  static ceres::CostFunction *Create(const Eigen::Vector3d &p_w,
+                                     const cv::Point2f &obs,
+                                     const Camera &cam) {
+    return new ceres::AutoDiffCostFunction<ReprojectionCostFunctor, 2,
+                                           Sophus::SE3d::num_parameters>(
+        new ReprojectionCostFunctor(p_w, obs, cam.fx, cam.fy, cam.cx, cam.cy));
   }
 
-  const double theta2 = theta * theta;
-  const double theta3 = theta2 * theta;
-
-  return Eigen::Matrix3d::Identity() + ((1.0 - std::cos(theta)) / theta2) * W +
-         ((theta - std::sin(theta)) / theta3) * W * W;
-}
-
-// left perturbation: T' = exp(xi) * T
-void applyLeftSE3Increment(const Eigen::Matrix<double, 6, 1> &dx,
-                           Eigen::Matrix3d &R_cw, Eigen::Vector3d &t_cw) {
-  const Eigen::Vector3d dtheta = dx.head<3>();
-  const Eigen::Vector3d drho = dx.tail<3>();
-
-  const Eigen::Matrix3d dR = expSO3(dtheta);
-  const Eigen::Vector3d dt = leftJacobianSO3(dtheta) * drho;
-
-  t_cw = dR * t_cw + dt;
-  R_cw = dR * R_cw;
-}
-
-double huberWeight(double squared_error, double delta) {
-  const double error = std::sqrt(std::max(0.0, squared_error));
-  if (error <= delta) {
-    return 1.0;
-  }
-  return delta / error;
-}
+private:
+  Eigen::Vector3d p_w_;
+  Eigen::Vector2d obs_;
+  double fx_, fy_, cx_, cy_;
+};
 
 bool projectPoint(const Eigen::Vector3d &p_w, const Eigen::Matrix3d &R_cw,
                   const Eigen::Vector3d &t_cw, const Camera &camera,
@@ -238,83 +215,41 @@ PoseEstimateResult Estimator::refinePosePoseOnly(
     return result;
   }
 
-  Eigen::Matrix3d R_cw = initial_rotation_cw;
-  Eigen::Vector3d t_cw = initial_translation_cw;
-
   result.reprojection_rmse_before =
-      computeReprojectionRmse(object_points, image_points, camera, R_cw, t_cw);
+      computeReprojectionRmse(object_points, image_points, camera, initial_rotation_cw, initial_translation_cw);
 
-  double last_cost = std::numeric_limits<double>::max();
+  Sophus::SE3d T_cw(Sophus::SO3d(initial_rotation_cw), initial_translation_cw);
 
-  for (int iter = 0; iter < options_.pose_refine_iterations; ++iter) {
-    Eigen::Matrix<double, 6, 6> H = Eigen::Matrix<double, 6, 6>::Zero();
-    Eigen::Matrix<double, 6, 1> b = Eigen::Matrix<double, 6, 1>::Zero();
+  ceres::Problem problem;
+  for (size_t i = 0; i < object_points.size(); ++i) {
+    problem.AddResidualBlock(
+        ReprojectionCostFunctor::Create(object_points[i], image_points[i],
+                                        camera),
+        new ceres::HuberLoss(options_.pose_refine_huber_delta), T_cw.data());
+  }
 
-    double cost = 0.0;
-    int valid_count = 0;
+  problem.SetManifold(T_cw.data(), new Sophus::Manifold<Sophus::SE3>());
 
-    for (size_t i = 0; i < object_points.size(); ++i) {
-      Eigen::Vector2d proj;
-      Eigen::Vector3d p_c;
-      if (!projectPoint(object_points[i], R_cw, t_cw, camera, proj, p_c)) {
-        continue;
-      }
+  ceres::Solver::Options solver_options;
+  solver_options.linear_solver_type = ceres::DENSE_QR;
+  solver_options.max_num_iterations = options_.pose_refine_iterations;
+  solver_options.function_tolerance = options_.pose_refine_epsilon;
+  solver_options.gradient_tolerance = 1e-10;
+  solver_options.logging_type = ceres::SILENT;
 
-      const Eigen::Vector2d obs(image_points[i].x, image_points[i].y);
-      const Eigen::Vector2d e = obs - proj;
+  ceres::Solver::Summary summary;
+  ceres::Solve(solver_options, &problem, &summary);
 
-      const double x = p_c.x();
-      const double y = p_c.y();
-      const double z = p_c.z();
-      const double z2 = z * z;
-
-      Eigen::Matrix<double, 2, 3> J_proj;
-      J_proj << camera.fx / z, 0.0, -camera.fx * x / z2, 0.0, camera.fy / z,
-          -camera.fy * y / z2;
-
-      Eigen::Matrix<double, 3, 6> J_pc_xi;
-      J_pc_xi.block<3, 3>(0, 0) = -hat(p_c);
-      J_pc_xi.block<3, 3>(0, 3) = Eigen::Matrix3d::Identity();
-
-      const Eigen::Matrix<double, 2, 6> J = J_proj * J_pc_xi;
-
-      const double w =
-          huberWeight(e.squaredNorm(), options_.pose_refine_huber_delta);
-
-      H += w * J.transpose() * J;
-      b += w * J.transpose() * e;
-      cost += w * e.squaredNorm();
-      valid_count++;
-    }
-
-    if (valid_count < options_.min_refine_inliers) {
-      return result;
-    }
-
-    const Eigen::Matrix<double, 6, 1> dx = H.ldlt().solve(b);
-
-    if (!dx.allFinite()) {
-      return result;
-    }
-
-    if (dx.norm() < options_.pose_refine_epsilon) {
-      break;
-    }
-
-    applyLeftSE3Increment(dx, R_cw, t_cw);
-
-    if (std::abs(last_cost - cost) < options_.pose_refine_epsilon) {
-      break;
-    }
-    last_cost = cost;
+  if (!summary.IsSolutionUsable()) {
+    return result;
   }
 
   result.success = true;
-  result.rotation = R_cw;
-  result.translation = t_cw;
+  result.rotation = T_cw.rotationMatrix();
+  result.translation = T_cw.translation();
   result.num_inliers = static_cast<int>(object_points.size());
-  result.reprojection_rmse_after =
-      computeReprojectionRmse(object_points, image_points, camera, R_cw, t_cw);
+  result.reprojection_rmse_after = computeReprojectionRmse(
+      object_points, image_points, camera, result.rotation, result.translation);
 
   return result;
 }
