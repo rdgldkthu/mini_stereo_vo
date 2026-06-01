@@ -15,11 +15,14 @@ find_package(Eigen3 REQUIRED)
 set(BUILD_SOPHUS_TESTS OFF CACHE BOOL "" FORCE)
 set(SOPHUS_INSTALL OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/Sophus)
+get_target_property(_sophus_inc sophus INTERFACE_INCLUDE_DIRECTORIES)
+set_target_properties(sophus PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_sophus_inc}")
 
 find_package(Ceres REQUIRED)
 
 find_package(OpenCV REQUIRED COMPONENTS core imgcodecs imgproc highgui features2d video calib3d)
 
+set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
 include(FetchContent)
 FetchContent_Declare(
   rerun_sdk
