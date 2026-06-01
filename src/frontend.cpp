@@ -67,21 +67,21 @@ void gatherPnPInliers(const std::vector<Eigen::Vector3d> &obj,
 }
 
 void filterTrackedByInliers(const std::vector<cv::Point2f> &pts,
-                              const std::vector<svo::MapPoint> &lms,
+                              const std::vector<int> &ids,
                               const std::vector<int> &inlier_idx,
                               std::vector<cv::Point2f> &out_pts,
-                              std::vector<svo::MapPoint> &out_lms,
+                              std::vector<int> &out_ids,
                               std::vector<int> &out_outlier_ids) {
   const std::unordered_set<int> inlier_set(inlier_idx.begin(), inlier_idx.end());
   out_pts.clear();
-  out_lms.clear();
+  out_ids.clear();
   out_outlier_ids.clear();
   for (int i = 0; i < static_cast<int>(pts.size()); ++i) {
     if (inlier_set.count(i)) {
       out_pts.push_back(pts[i]);
-      out_lms.push_back(lms[i]);
+      out_ids.push_back(ids[i]);
     } else {
-      out_outlier_ids.push_back(lms[i].id);
+      out_outlier_ids.push_back(ids[i]);
     }
   }
 }
@@ -104,6 +104,11 @@ bool createKeyframeFromStereo(svo::Frontend &frontend,
   lms = transformLandmarksToWorld(lms, pose_wc);
   auto pts  = makeInitialActivePoints(result);
 
+  std::vector<int> ids;
+  for (auto &lm : lms) {
+    ids.push_back(lm.id);
+  }
+
   if (replace_active) {
     map.addLandmarks(lms);
   } else {
@@ -115,7 +120,7 @@ bool createKeyframeFromStereo(svo::Frontend &frontend,
     map.addLandmarks(lms);
   }
 
-  frontend.setActiveTracks(pts, lms);
+  frontend.setActiveTracks(pts, ids);
   return true;
 }
 
@@ -130,7 +135,7 @@ Frontend::Frontend(const Options &options) : options_(options) {}
 // ---------------------------------------------------------------------------
 void Frontend::initialize(const Frame &frame0,
                           std::vector<cv::Point2f> active_points,
-                          std::vector<MapPoint> active_landmarks) {
+                          std::vector<int> active_landmark_ids) {
   poses_.clear();
   poses_.push_back(Eigen::Matrix4d::Identity());
 
@@ -139,7 +144,7 @@ void Frontend::initialize(const Frame &frame0,
   prev_frame_.is_keyframe = true;
 
   active_points_2d_ = std::move(active_points);
-  active_landmarks_ = std::move(active_landmarks);
+  active_landmark_ids_ = std::move(active_landmark_ids);
 
   last_keyframe_frame_id_  = frame0.id;
   last_keyframe_pose_wc_   = Eigen::Matrix4d::Identity();
@@ -172,7 +177,12 @@ bool Frontend::bootstrap(Frame &frame0, StereoInitializer &initializer,
   auto lms = makeInitialActiveLandmarks(result);
   map.assignNewLandmarkIds(lms);
 
-  initialize(frame0, makeInitialActivePoints(result), lms);
+  std::vector<int> ids;
+  for (auto& lm : lms) {
+    ids.push_back(lm.id);
+  }
+
+  initialize(frame0, makeInitialActivePoints(result), ids);
 
   frame0.pose_wc   = Eigen::Matrix4d::Identity();
   frame0.is_keyframe = true;
@@ -200,7 +210,7 @@ ProcessFrameResult Frontend::processFrame(int frame_id, Frame &curr_frame,
   FrontendFrameStats &fs = result.stats;
 
   const TrackResult tr = tracker.trackFrameToFrame(
-      prev_frame_, curr_frame, active_points_2d_, active_landmarks_,
+      prev_frame_, curr_frame, active_points_2d_, active_landmark_ids_,
       save_debug, {0, 0});
 
   if (!tr.prev_points.empty()) {
@@ -216,11 +226,22 @@ ProcessFrameResult Frontend::processFrame(int frame_id, Frame &curr_frame,
     std::nth_element(dv.begin(), dv.begin() + mid, dv.end());
   }
 
-  fs.num_correspondences = tr.num_valid_correspondences;
+  std::vector<Eigen::Vector3d> object_points;
+  std::vector<int> valid_ids;
+  std::vector<cv::Point2f> valid_curr_pts;
+  for (size_t i = 0; i < tr.landmark_ids.size(); ++i) {
+    const MapPoint *lm = map.landmark(tr.landmark_ids[i]);
+    if (!lm) continue;
+    object_points.push_back(lm->p_w);
+    valid_ids.push_back(tr.landmark_ids[i]);
+    valid_curr_pts.push_back(tr.curr_points[i]);
+  }
+
+  fs.num_correspondences = static_cast<int>(valid_ids.size());
   const auto &est_opts   = estimator.options();
   std::vector<int> pnp_inlier_idx;
 
-  if (tr.num_valid_correspondences >= est_opts.min_pnp_points) {
+  if (fs.num_correspondences >= est_opts.min_pnp_points) {
     Eigen::Matrix3d init_R_cw = Eigen::Matrix3d::Identity();
     Eigen::Vector3d init_t_cw = Eigen::Vector3d::Zero();
 
@@ -228,7 +249,7 @@ ProcessFrameResult Frontend::processFrame(int frame_id, Frame &curr_frame,
     svo::poseCwFromWc(T_pred, init_R_cw, init_t_cw);
 
     const PoseEstimateResult raw =
-        estimator.estimatePosePnPRansac(tr.object_points, tr.image_points,
+        estimator.estimatePosePnPRansac(object_points, valid_curr_pts,
                                         camera, init_R_cw, init_t_cw, true);
 
     if (raw.success) {
@@ -239,7 +260,7 @@ ProcessFrameResult Frontend::processFrame(int frame_id, Frame &curr_frame,
       if (raw.num_inliers >= est_opts.min_refine_inliers) {
         std::vector<Eigen::Vector3d> inlier_obj;
         std::vector<cv::Point2f>     inlier_img;
-        gatherPnPInliers(tr.object_points, tr.image_points,
+        gatherPnPInliers(object_points, valid_curr_pts,
                          raw.inlier_indices, inlier_obj, inlier_img);
         const PoseEstimateResult refined =
             estimator.refinePosePoseOnly(inlier_obj, inlier_img, camera,
@@ -251,31 +272,27 @@ ProcessFrameResult Frontend::processFrame(int frame_id, Frame &curr_frame,
       fs.rmse_before = raw.reprojection_rmse_before;
       fs.rmse_after  = final_pose.reprojection_rmse_after;
 
-      acceptPose(frame_id, raw.num_inliers, tr.num_valid_correspondences,
+      acceptPose(frame_id, raw.num_inliers, fs.num_correspondences,
                  svo::poseWcFromCw(final_pose.rotation, final_pose.translation),
                  fs);
     } else {
-      rejectPose(frame_id, tr.num_valid_correspondences, fs);
+      rejectPose(frame_id, fs.num_correspondences, fs);
     }
   } else {
-    rejectPose(frame_id, tr.num_valid_correspondences, fs);
+    rejectPose(frame_id, fs.num_correspondences, fs);
   }
 
   std::vector<cv::Point2f> culled_pts;
-  std::vector<MapPoint>    culled_lms;
   std::vector<int>         culled_ids;
 
   if (!pnp_inlier_idx.empty()) {
     std::vector<int> outlier_ids;
-    filterTrackedByInliers(tr.curr_points, tr.tracked_landmarks,
-                           pnp_inlier_idx, culled_pts, culled_lms, outlier_ids);
-    for (const auto &lm : culled_lms)
-      culled_ids.push_back(lm.id);
+    filterTrackedByInliers(valid_curr_pts, valid_ids, pnp_inlier_idx,
+                           culled_pts, culled_ids, outlier_ids);
     map.markOutlierLandmarks(outlier_ids);
   } else {
-    culled_pts = tr.curr_points;
-    culled_lms = tr.tracked_landmarks;
-    culled_ids = tr.landmark_ids;
+    culled_pts = valid_curr_pts;
+    culled_ids = valid_ids;
   }
 
   if (shouldReinitialize(frame_id, fs.pose_accepted,
@@ -288,10 +305,10 @@ ProcessFrameResult Frontend::processFrame(int frame_id, Frame &curr_frame,
       noteReinitialized(frame_id);
       fs.reinitialized = true;
     } else {
-      setActiveTracks(culled_pts, culled_lms);
+      setActiveTracks(culled_pts, culled_ids);
     }
   } else {
-    setActiveTracks(culled_pts, culled_lms);
+    setActiveTracks(culled_pts, culled_ids);
   }
 
   if (!fs.reinitialized) {
@@ -312,9 +329,7 @@ ProcessFrameResult Frontend::processFrame(int frame_id, Frame &curr_frame,
   if (fs.pose_accepted) {
     curr_frame.pose_wc = poses_.back();
     curr_frame.tracked_points = active_points_2d_;
-    curr_frame.tracked_landmark_ids.clear();
-    for (const auto &lm : active_landmarks_)
-      curr_frame.tracked_landmark_ids.push_back(lm.id);
+    curr_frame.tracked_landmark_ids = active_landmark_ids_;
 
     if (needNewKeyframe(curr_frame.pose_wc,
                         static_cast<int>(active_points_2d_.size()), frame_id)) {
@@ -419,9 +434,9 @@ void Frontend::rejectPose(int frame_id, int /*num_correspondences*/,
 }
 
 void Frontend::setActiveTracks(const std::vector<cv::Point2f> &points,
-                                const std::vector<MapPoint> &landmarks) {
+                                const std::vector<int> &landmark_ids) {
   active_points_2d_ = points;
-  active_landmarks_ = landmarks;
+  active_landmark_ids_ = landmark_ids;
 }
 
 bool Frontend::shouldSaveDenseDebug(int frame_id, int radius) const {

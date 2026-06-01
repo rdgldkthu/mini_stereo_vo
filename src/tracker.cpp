@@ -17,7 +17,7 @@ bool Tracker::isInsideImage(const cv::Point2f &pt,
 TrackResult
 Tracker::trackFrameToFrame(const Frame &prev_frame, const Frame &curr_frame,
                            const std::vector<cv::Point2f> &prev_points,
-                           const std::vector<MapPoint> &prev_landmarks,
+                           const std::vector<int> &prev_landmark_ids,
                            bool build_visualization,
                            cv::Point2f motion_hint) const {
   TrackResult result;
@@ -25,10 +25,10 @@ Tracker::trackFrameToFrame(const Frame &prev_frame, const Frame &curr_frame,
   if (prev_frame.left_img.empty() || curr_frame.left_img.empty()) {
     return result;
   }
-  if (prev_points.empty() || prev_landmarks.empty()) {
+  if (prev_points.empty() || prev_landmark_ids.empty()) {
     return result;
   }
-  if (prev_points.size() != prev_landmarks.size()) {
+  if (prev_points.size() != prev_landmark_ids.size()) {
     return result;
   }
 
@@ -99,10 +99,7 @@ Tracker::trackFrameToFrame(const Frame &prev_frame, const Frame &curr_frame,
 
     result.prev_points.push_back(prev_points[i]);
     result.curr_points.push_back(curr_points[i]);
-    result.tracked_landmarks.push_back(prev_landmarks[i]);
-    result.object_points.push_back(prev_landmarks[i].p_w);
-    result.image_points.push_back(curr_points[i]);
-    result.landmark_ids.push_back(prev_landmarks[i].id);
+    result.landmark_ids.push_back(prev_landmark_ids[i]);
     result.num_valid_correspondences++;
 
     if (build_visualization && num_visualized < options_.max_visualized_tracks) {

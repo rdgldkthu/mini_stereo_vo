@@ -118,7 +118,7 @@ public:
                           int num_active_tracks) const;
 
   void setActiveTracks(const std::vector<cv::Point2f> &points,
-                       const std::vector<MapPoint> &landmarks);
+                       const std::vector<int> &landmark_ids);
 
   bool shouldSaveDenseDebug(int frame_id, int radius) const;
 
@@ -134,14 +134,9 @@ public:
     return active_points_2d_;
   }
 
-  std::vector<MapPoint> &activeLandmarks() { return active_landmarks_; }
-  const std::vector<MapPoint> &activeLandmarks() const {
-    return active_landmarks_;
-  }
-
 private:
   void initialize(const Frame &frame0, std::vector<cv::Point2f> active_points,
-                  std::vector<MapPoint> active_landmarks);
+                  std::vector<int> active_landmark_ids);
 
   Options options_;
 
@@ -154,7 +149,7 @@ private:
   Frame prev_frame_;
 
   std::vector<cv::Point2f> active_points_2d_;
-  std::vector<MapPoint> active_landmarks_;
+  std::vector<int> active_landmark_ids_;
 
   int last_keyframe_frame_id_ = 0;
   Eigen::Matrix4d last_keyframe_pose_wc_ = Eigen::Matrix4d::Identity();

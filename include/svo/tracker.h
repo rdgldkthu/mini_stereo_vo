@@ -7,18 +7,12 @@
 #include <opencv2/opencv.hpp>
 
 #include "svo/frame.h"
-#include "svo/map_point.h"
 
 namespace svo {
 
 struct TrackResult {
   std::vector<cv::Point2f> prev_points;
   std::vector<cv::Point2f> curr_points;
-
-  std::vector<MapPoint> tracked_landmarks;
-
-  std::vector<Eigen::Vector3d> object_points;
-  std::vector<cv::Point2f> image_points;
   std::vector<int> landmark_ids;
 
   cv::Mat track_vis;
@@ -57,7 +51,7 @@ public:
   TrackResult
   trackFrameToFrame(const Frame &prev_frame, const Frame &curr_frame,
                     const std::vector<cv::Point2f> &prev_points,
-                    const std::vector<MapPoint> &prev_landmarks,
+                    const std::vector<int> &prev_landmark_ids,
                     bool build_visualization = false,
                     cv::Point2f motion_hint = {0.0f, 0.0f}) const;
 
