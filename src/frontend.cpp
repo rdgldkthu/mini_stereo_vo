@@ -105,7 +105,7 @@ bool createKeyframeFromStereo(svo::Frontend &frontend,
   auto pts  = makeInitialActivePoints(result);
 
   if (replace_active) {
-    map.setActiveLandmarks(lms);
+    map.addLandmarks(lms);
   } else {
     frame.pose_wc = pose_wc;
     frame.tracked_points.insert(frame.tracked_points.end(), pts.begin(), pts.end());
@@ -182,7 +182,7 @@ bool Frontend::bootstrap(Frame &frame0, StereoInitializer &initializer,
     frame0.tracked_landmark_ids.push_back(lm.id);
 
   map.addKeyframe(frame0);
-  map.setActiveLandmarks(lms);
+  map.addLandmarks(lms);
 
   return true;
 }
@@ -295,8 +295,17 @@ ProcessFrameResult Frontend::processFrame(int frame_id, Frame &curr_frame,
   }
 
   if (!fs.reinitialized) {
-    map.markTrackedLandmarks(culled_lms);
-    map.markMissedLandmarks(culled_ids);
+    map.markTracked(culled_ids);
+
+    const std::vector<int> local_ids = map.localMapLandmarkIds();
+    const std::unordered_set<int> tracked_set(culled_ids.begin(), culled_ids.end());
+    std::vector<int> missed_ids;
+    missed_ids.reserve(local_ids.size());
+    for (int id : local_ids) {
+      if (!tracked_set.count(id)) missed_ids.push_back(id);
+    }
+    map.markMissedLandmarks(missed_ids);
+
     map.pruneLandmarks();
   }
 

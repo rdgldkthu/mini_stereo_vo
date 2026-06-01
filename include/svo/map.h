@@ -31,12 +31,11 @@ public:
 
   void addKeyframe(const Frame &frame);
 
-  void setActiveLandmarks(const std::vector<MapPoint> &landmarks);
   void addLandmarks(const std::vector<MapPoint> &landmarks);
 
   void assignNewLandmarkIds(std::vector<MapPoint> &landmarks);
 
-  void markTrackedLandmarks(const std::vector<MapPoint> &tracked_landmarks);
+  void markTracked(const std::vector<int> &tracked_landmark_ids);
   void markMissedLandmarks(const std::vector<int> &tracked_landmark_ids);
   void markOutlierLandmarks(const std::vector<int> &outlier_ids);
   // Increment keyframe_observations for each landmark in landmark_ids.
@@ -48,21 +47,17 @@ public:
   const std::deque<Frame> &activeKeyframes() const;
   std::deque<Frame> &mutableActiveKeyframes();
 
-  const std::vector<MapPoint> &activeLandmarks() const;
-  std::vector<MapPoint> &mutableActiveLandmarks();
-
   int numActiveKeyframes() const;
   int numActiveLandmarks() const;
 
-private:
-  int findLandmarkIndexById(int landmark_id) const;
-  void rebuildIndex();
+  const MapPoint* landmark(int id) const;
+  MapPoint* landmark(int id);
+  std::vector<int> localMapLandmarkIds() const;
 
 private:
   Options options_;
   std::deque<Frame> active_keyframes_;
-  std::vector<MapPoint> active_landmarks_;
-  std::unordered_map<int, size_t> id_to_index_;
+  std::unordered_map<int, MapPoint> landmarks_;
 
   int next_landmark_id = 0;
 };
