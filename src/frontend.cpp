@@ -143,10 +143,12 @@ void Frontend::initialize(const Frame &frame0,
 
   last_keyframe_frame_id_  = frame0.id;
   last_keyframe_pose_wc_   = Eigen::Matrix4d::Identity();
+
   last_init_frame_id_      = frame0.id;
   consecutive_rejected_poses_ = 0;
   dense_debug_center_      = -1;
-  motion_hint_             = {0.f, 0.f};
+
+  motion_model_.anchor(poses_.back());
 }
 
 // ---------------------------------------------------------------------------
@@ -199,7 +201,7 @@ ProcessFrameResult Frontend::processFrame(int frame_id, Frame &curr_frame,
 
   const TrackResult tr = tracker.trackFrameToFrame(
       prev_frame_, curr_frame, active_points_2d_, active_landmarks_,
-      save_debug, motion_hint_);
+      save_debug, {0, 0});
 
   if (!tr.prev_points.empty()) {
     std::vector<float> du, dv;
@@ -212,7 +214,6 @@ ProcessFrameResult Frontend::processFrame(int frame_id, Frame &curr_frame,
     const size_t mid = du.size() / 2;
     std::nth_element(du.begin(), du.begin() + mid, du.end());
     std::nth_element(dv.begin(), dv.begin() + mid, dv.end());
-    motion_hint_ = {du[mid], dv[mid]};
   }
 
   fs.num_correspondences = tr.num_valid_correspondences;
@@ -223,20 +224,8 @@ ProcessFrameResult Frontend::processFrame(int frame_id, Frame &curr_frame,
     Eigen::Matrix3d init_R_cw = Eigen::Matrix3d::Identity();
     Eigen::Vector3d init_t_cw = Eigen::Vector3d::Zero();
 
-    // Constant-velocity seed: T_pred = T_curr * T_prev^{-1} * T_curr.
-    // Falls back to the last pose when fewer than two poses exist or when the
-    // previous frame's pose was rejected (no reliable velocity estimate).
-    if (poses_.size() >= 2 && consecutive_rejected_poses_ == 0) {
-      const Eigen::Matrix4d &T_prev = poses_[poses_.size() - 2];
-      const Eigen::Matrix4d &T_curr = poses_.back();
-      Eigen::Matrix4d T_prev_inv    = Eigen::Matrix4d::Identity();
-      T_prev_inv.block<3, 3>(0, 0)  = T_prev.block<3, 3>(0, 0).transpose();
-      T_prev_inv.block<3, 1>(0, 3)  =
-          -T_prev_inv.block<3, 3>(0, 0) * T_prev.block<3, 1>(0, 3);
-      svo::poseCwFromWc(T_curr * T_prev_inv * T_curr, init_R_cw, init_t_cw);
-    } else {
-      svo::poseCwFromWc(poses_.back(), init_R_cw, init_t_cw);
-    }
+    const Eigen::Matrix4d T_pred = motion_model_.predict();
+    svo::poseCwFromWc(T_pred, init_R_cw, init_t_cw);
 
     const PoseEstimateResult raw =
         estimator.estimatePosePnPRansac(tr.object_points, tr.image_points,
@@ -298,7 +287,6 @@ ProcessFrameResult Frontend::processFrame(int frame_id, Frame &curr_frame,
                                   options_.min_initial_landmarks)) {
       noteReinitialized(frame_id);
       fs.reinitialized = true;
-      motion_hint_ = {0.f, 0.f};
     } else {
       setActiveTracks(culled_pts, culled_lms);
     }
@@ -371,9 +359,11 @@ bool Frontend::acceptPose(int frame_id, int num_inliers,
     poses_.push_back(candidate_pose);
     consecutive_rejected_poses_ = 0;
     stats.pose_accepted = true;
+    motion_model_.update(poses_.back());
   } else {
     poses_.push_back(poses_.back());
     notePoseRejected(frame_id);
+    motion_model_.onRejected();
   }
 
   return accepted;
@@ -416,6 +406,7 @@ void Frontend::rejectPose(int frame_id, int /*num_correspondences*/,
                            FrontendFrameStats & /*stats*/) {
   poses_.push_back(poses_.back());
   notePoseRejected(frame_id);
+  motion_model_.onRejected();
 }
 
 void Frontend::setActiveTracks(const std::vector<cv::Point2f> &points,

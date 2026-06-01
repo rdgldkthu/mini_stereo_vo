@@ -8,6 +8,7 @@
 
 #include "svo/frame.h"
 #include "svo/map_point.h"
+#include "svo/motion_model.h"
 
 namespace svo {
 
@@ -162,7 +163,7 @@ private:
   int consecutive_rejected_poses_ = 0;
   int dense_debug_center_ = -1;
 
-  cv::Point2f motion_hint_{0.f, 0.f};
+  MotionModel motion_model_;
 };
 
 } // namespace svo
