@@ -4,7 +4,6 @@
 #include <fstream>
 #include <iostream>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -26,27 +25,6 @@
 namespace fs = std::filesystem;
 
 namespace {
-
-std::vector<Eigen::Matrix4d> loadKittiPoses(const fs::path &pose_path) {
-  std::vector<Eigen::Matrix4d> poses;
-  std::ifstream ifs(pose_path);
-  if (!ifs) {
-    std::cerr << "GT pose file not found: " << pose_path << "\n";
-    return poses;
-  }
-  std::string line;
-  while (std::getline(ifs, line)) {
-    std::stringstream ss(line);
-    Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
-    for (int r = 0; r < 3; ++r)
-      for (int c = 0; c < 4; ++c)
-        ss >> T(r, c);
-    if (ss) poses.push_back(T);
-  }
-  std::cout << "Loaded " << poses.size() << " ground-truth poses from "
-            << pose_path << "\n";
-  return poses;
-}
 
 } // namespace
 
@@ -112,8 +90,7 @@ int main(int argc, char **argv) {
   std::cout << "Loaded calibration from: " << dataset.calibPath() << "\n";
   camera.print();
 
-  const auto gt_poses =
-      loadKittiPoses(kitti_root / "poses" / (sequence + ".txt"));
+  const auto gt_poses = dataset.loadGtPoses();
 
   cv::setRNGSeed(42);
 

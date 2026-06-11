@@ -1,7 +1,9 @@
 #include "svo/dataset_kitti.h"
 
 #include <algorithm>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 
 #include <opencv2/opencv.hpp>
 
@@ -28,7 +30,8 @@ std::vector<fs::path> DatasetKitti::sortedPngs(const fs::path &dir) {
 bool DatasetKitti::open(const std::string &kitti_root,
                         const std::string &sequence) {
   sequence_ = sequence;
-  seq_dir_ = fs::path(kitti_root) / "sequences" / sequence;
+  kitti_root_ = fs::path(kitti_root);
+  seq_dir_ = kitti_root_ / "sequences" / sequence;
   calib_path_ = seq_dir_ / "calib.txt";
 
   const fs::path left_dir = seq_dir_ / "image_0";
@@ -74,6 +77,28 @@ bool DatasetKitti::loadFrame(int frame_id, Frame &frame) const {
   }
 
   return true;
+}
+
+std::vector<Eigen::Matrix4d> DatasetKitti::loadGtPoses() const {
+  const fs::path pose_path = kitti_root_ / "poses" / (sequence_ + ".txt");
+  std::vector<Eigen::Matrix4d> poses;
+  std::ifstream ifs(pose_path);
+  if (!ifs) {
+    std::cerr << "GT pose file not found: " << pose_path << "\n";
+    return poses;
+  }
+  std::string line;
+  while (std::getline(ifs, line)) {
+    std::stringstream ss(line);
+    Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
+    for (int r = 0; r < 3; ++r)
+      for (int c = 0; c < 4; ++c)
+        ss >> T(r, c);
+    if (ss) poses.push_back(T);
+  }
+  std::cout << "Loaded " << poses.size() << " ground-truth poses from "
+            << pose_path << "\n";
+  return poses;
 }
 
 } // namespace svo

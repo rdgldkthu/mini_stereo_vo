@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include <Eigen/Core>
+
 #include "svo/frame.h"
 
 namespace svo {
@@ -14,6 +16,8 @@ public:
   bool open(const std::string &kitti_root, const std::string &sequence);
 
   bool loadFrame(int frame_id, Frame &frame) const;
+
+  std::vector<Eigen::Matrix4d> loadGtPoses() const;
 
   int numFrames() const { return static_cast<int>(left_images_.size()); }
 
@@ -26,6 +30,7 @@ private:
 
 private:
   std::string sequence_;
+  std::filesystem::path kitti_root_;
   std::filesystem::path seq_dir_;
   std::filesystem::path calib_path_;
   std::vector<std::filesystem::path> left_images_;
