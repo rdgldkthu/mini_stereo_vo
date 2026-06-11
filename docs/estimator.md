@@ -8,7 +8,7 @@
 `Estimator` is the numerical core of the pipeline. It provides two operations:
 
 1. **`estimatePosePnPRansac`** — robust pose estimation from 3D–2D correspondences via OpenCV's `solvePnPRansac`.
-2. **`refinePosePoseOnly`** — Gauss-Newton pose-only refinement on the inlier set, using a left-perturbation SE(3) parameterisation with Huber loss.
+2. **`refinePosePoseOnly`** — Ceres-based pose-only refinement on the inlier set, using Sophus SE(3) manifold parameterisation with Huber loss and autodiff Jacobians.
 
 Both methods return result structs and do not mutate shared state. `Frontend::processFrame` decides whether to accept the results.
 
@@ -59,9 +59,8 @@ struct Options {
 };
 ```
 
-Runtime values set in `run_kitti.cpp`:
-- `reprojection_error_px = 3.0f`
-- All other values match struct defaults.
+Runtime values set in `run_kitti.cpp` (all others match struct defaults):
+- `reprojection_error_px = 3.0f` (struct default: 4.0f)
 
 ---
 
@@ -103,62 +102,33 @@ The no-guess overload calls the second form with identity and `use_initial_guess
 
 ## `refinePosePoseOnly`
 
-Gauss-Newton pose-only optimisation over the PnP inlier set. Operates in double precision. The pose is parameterised on the Lie algebra of SE(3) using a **left perturbation** model.
+Ceres-based pose-only optimisation over the PnP inlier set. The pose is parameterised as a `Sophus::SE3d` with the `Sophus::Manifold<Sophus::SE3>` manifold, so Ceres handles the retraction automatically. Jacobians are computed via **autodiff** — no hand-rolled Lie algebra derivatives.
 
-### SE(3) Left Perturbation
-
-The update is applied as:
-
-$$T_{cw} \leftarrow \exp(\hat{\xi}) \cdot T_{cw}$$
-
-where $\xi = [\boldsymbol{\omega}^\top, \boldsymbol{\rho}^\top]^\top \in \mathbb{R}^6$ is the Lie algebra element (rotation first, translation second).
-
-The implemented exponential map:
-
-$$\exp(\hat{\omega}) = I + \sin\theta \cdot [\hat{a}] + (1-\cos\theta) \cdot [\hat{a}]^2 \quad \text{(Rodrigues)}$$
-
-$$\Delta t = J_l(\omega) \cdot \rho$$
-
-where $J_l$ is the left Jacobian of SO(3):
-
-$$J_l(\omega) = I + \frac{1-\cos\theta}{\theta^2} [\omega]_\times + \frac{\theta - \sin\theta}{\theta^3} [\omega]_\times^2$$
-
-### Per-observation Jacobian
-
-For a 3D point $\mathbf{p}_w$ projected to camera frame $\mathbf{p}_c = R_{cw}\mathbf{p}_w + \mathbf{t}_{cw}$, the reprojection is:
-
-$$\pi(\mathbf{p}_c) = \begin{pmatrix} f_x \cdot p_{cx}/p_{cz} + c_x \\ f_y \cdot p_{cy}/p_{cz} + c_y \end{pmatrix}$$
-
-**Projection Jacobian** (2×3):
-
-$$J_\pi = \begin{pmatrix} f_x/z & 0 & -f_x x/z^2 \\ 0 & f_y/z & -f_y y/z^2 \end{pmatrix}$$
-
-**Camera-point Jacobian w.r.t. left SE(3) perturbation** (3×6):
-
-$$J_{\mathbf{p}_c,\xi} = \begin{pmatrix} -[\mathbf{p}_c]_\times & I_3 \end{pmatrix}$$
-
-where $[\mathbf{p}_c]_\times$ is the skew-symmetric matrix of $\mathbf{p}_c$.
-
-**Full Jacobian** (2×6):
-
-$$J = J_\pi \cdot J_{\mathbf{p}_c,\xi}$$
-
-### Huber Loss
-
-$$w = \begin{cases} 1 & \text{if } \|\mathbf{e}\| \leq \delta \\ \delta / \|\mathbf{e}\| & \text{otherwise} \end{cases} \quad \delta = 5.0 \text{ px}$$
-
-### Normal Equations
-
-$$H = \sum_i w_i J_i^\top J_i, \quad \mathbf{b} = \sum_i w_i J_i^\top \mathbf{e}_i$$
-
-$$H \cdot \Delta\xi = \mathbf{b} \quad \text{(LDLT solve)}$$
-
-Iteration stops when `‖Δξ‖ < 1e-6` or cost change `< 1e-6`, up to 10 iterations.
+### Cost Functor
 
 ```cpp
-const Eigen::Matrix<double, 6, 1> dx = H.ldlt().solve(b);
-applyLeftSE3Increment(dx, R_cw, t_cw);
+struct ReprojectionCostFunctor {
+    // Residual: [fx*(px/pz)+cx - obs_x, fy*(py/pz)+cy - obs_y]  (2 components)
+    template <typename T>
+    bool operator()(const T* const pose_data, T* residuals) const;
+};
 ```
+
+The functor maps `Sophus::SE3<T>` (7 parameters, internal Sophus layout) to a 2-component pixel residual. Points behind the camera (`p_c[2] <= 1e-8`) return zero residuals.
+
+### Solver Configuration
+
+| Parameter | Value |
+|---|---|
+| Loss function | `ceres::HuberLoss(pose_refine_huber_delta)` (default 5.0 px) |
+| Linear solver | `ceres::DENSE_QR` |
+| Max iterations | `pose_refine_iterations` (default 10) |
+| Function tolerance | `pose_refine_epsilon` (default 1e-6) |
+| Manifold | `Sophus::Manifold<Sophus::SE3>` |
+
+Refinement is skipped when `object_points.size() < min_refine_inliers` (default 10).
+
+On failure (`!summary.IsSolutionUsable()`), returns an unsuccessful `PoseEstimateResult`.
 
 ---
 
@@ -166,11 +136,7 @@ applyLeftSE3Increment(dx, R_cw, t_cw);
 
 | Function | Description |
 |---|---|
-| `hat(w)` | 3×3 skew-symmetric matrix from `Vector3d` |
-| `expSO3(w)` | Rodrigues exponential map on SO(3) |
-| `leftJacobianSO3(w)` | Left Jacobian of SO(3) |
-| `applyLeftSE3Increment(dx, R, t)` | Updates `(R_cw, t_cw)` by left-multiplying `exp(dx)` |
-| `huberWeight(sq_err, delta)` | Returns Huber weight scalar |
+| `ReprojectionCostFunctor` | Ceres AutoDiff cost functor; maps `Sophus::SE3<T>` to 2-D pixel residual |
 | `projectPoint(p_w, R_cw, t_cw, cam, pixel, p_c)` | Projects 3D point; returns `false` if behind camera |
 | `computeReprojectionRmse(...)` | RMSE over a set of 3D–2D correspondences |
 

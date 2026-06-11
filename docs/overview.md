@@ -1,6 +1,6 @@
 # mini_stereo_vo — Project Overview
 
-A minimal stereo visual odometry system written in C++17. It runs on KITTI odometry sequences and estimates a 6-DoF camera trajectory using ORB-based stereo initialisation, pyramidal LK optical flow tracking, and PnP-RANSAC pose estimation with Gauss-Newton refinement.
+A minimal stereo visual odometry system written in C++17. It runs on KITTI odometry sequences and estimates a 6-DoF camera trajectory using ORB-based stereo initialisation, pyramidal LK optical flow tracking, and PnP-RANSAC pose estimation with Ceres/Sophus SE(3) pose refinement.
 
 ---
 
@@ -9,7 +9,7 @@ A minimal stereo visual odometry system written in C++17. It runs on KITTI odome
 ```
 mini_stereo_vo/
 ├── app/
-│   └── run_kitti.cpp           Main entry point (326 lines)
+│   └── run_kitti.cpp           Main entry point (303 lines)
 ├── include/svo/                Public headers (svo namespace)
 │   ├── camera.h
 │   ├── dataset_kitti.h
@@ -28,7 +28,7 @@ mini_stereo_vo/
 ├── src/                        Implementations
 │   ├── camera.cpp
 │   ├── dataset_kitti.cpp
-│   ├── estimator.cpp           (322 lines)
+│   ├── estimator.cpp           (257 lines)
 │   ├── frontend.cpp            (462 lines — largest file)
 │   ├── map.cpp
 │   ├── pose_writer.cpp
@@ -343,7 +343,7 @@ tx, ty, tz, delta_t, rmse_before, rmse_after
 |---|---|---|
 | Camera | [camera.md](camera.md) | Intrinsics, projection matrices, triangulation |
 | DatasetKitti | [dataset_kitti.md](dataset_kitti.md) | KITTI sequence I/O |
-| Estimator | [estimator.md](estimator.md) | PnP RANSAC and Gauss-Newton pose refinement |
+| Estimator | [estimator.md](estimator.md) | PnP RANSAC and Ceres/Sophus SE(3) pose refinement |
 | Feature | [feature.md](feature.md) | Stereo keypoint pair struct |
 | Frame | [frame.md](frame.md) | Per-frame data carrier |
 | Frontend | [frontend.md](frontend.md) | Pipeline gatekeeper, pose history, reinit logic |

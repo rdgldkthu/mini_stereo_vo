@@ -110,10 +110,10 @@ This eliminates drifted tracks and tracks that flow off the image edge.
 
 ```
 num_input_tracks
-    │  (forward LK fails or backward LK fails)
+    │  (forward LK or backward LK fails)
     ▼
 num_flow_success
-    │  (bidirectional error > 1.5 px)
+    │  (bidirectional error > 1.5 px  OR  point outside image border)
     ▼
 num_inside_image  =  num_valid_correspondences
 ```
